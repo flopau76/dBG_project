@@ -1,0 +1,10 @@
+[package]
+name = "rust_dbg"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bio = "1"
+nthash = "0.5.1"
+arrayvec = "0.7.6"
+memmap2 = "0.9.5"
