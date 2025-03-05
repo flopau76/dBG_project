@@ -17,6 +17,7 @@ pub struct UnitigMetadata {
     pub edges: ArrayVec<Edge, 8>,
     pub seq: Sequence,
 }
+
 impl UnitigMetadata {
     fn from_unitig_header(line: &str) -> Result<UnitigMetadata, Box<dyn std::error::Error>> {
         // Initialize values
@@ -68,40 +69,67 @@ impl UnitigMetadata {
     }
 }
 
-pub type GraphMetadata = Vec<UnitigMetadata>;
+pub struct GraphMetadata(Vec<UnitigMetadata>);
 
-pub fn metadata_from_fasta(file_path: &str) -> Result<GraphMetadata, Box<dyn std::error::Error>> {
-    let mut metadata = GraphMetadata::new();
-    let bio_reader = fasta::Reader::from_file(file_path)?;
+impl IntoIterator for GraphMetadata {
+    type Item = UnitigMetadata;
+    type IntoIter = std::vec::IntoIter<UnitigMetadata>;
 
-    let mut current_id: usize = 0;
-
-    // Parse BCALM file
-    for result in bio_reader.records() {
-        // Read record
-        let record = result?;
-        let unitig_id: usize = record.id().parse()?;
-        let unitig_desc = record.desc().ok_or(format!(
-            "Invalid Bcalm: Unitig {} does not have a description",
-            unitig_id
-        ))?;
-        let unitig_seq = record.seq();
-
-        if current_id != unitig_id {
-            return Err(format!("Invalid bcalm: Unitigs must be indexed sequentially, starting at 0. Expected {}, got {}", 
-                      current_id, unitig_id).into());
-        }
-
-        // Parse record into UnitigMetadata
-        let mut unitig = UnitigMetadata::from_unitig_header(&unitig_desc)?;
-        unitig.seq = Vec::with_capacity(unitig.length as usize);
-        unitig.seq.extend_from_slice(unitig_seq);
-
-        // Add metadata to graph
-        metadata.push(unitig);
-        current_id += 1;
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
     }
-    Ok(metadata)
+}
+
+impl GraphMetadata {
+    pub fn new() -> GraphMetadata {
+        GraphMetadata(Vec::new())
+    }
+
+    pub fn push(&mut self, unitig: UnitigMetadata) {
+        self.0.push(unitig);
+    }
+
+    pub fn get(&self, idx: usize) -> Option<&UnitigMetadata> {
+        self.0.get(idx)
+    }
+
+    pub fn iter(&self) -> std::slice::Iter<UnitigMetadata> {
+        self.0.iter()
+    }
+
+    pub fn from_fasta(file_path: &str) -> Result<GraphMetadata, Box<dyn std::error::Error>> {
+        let mut metadata = GraphMetadata(Vec::new());
+        let bio_reader = fasta::Reader::from_file(file_path)?;
+    
+        let mut current_id: usize = 0;
+    
+        // Parse BCALM file
+        for result in bio_reader.records() {
+            // Read record
+            let record = result?;
+            let unitig_id: usize = record.id().parse()?;
+            let unitig_desc = record.desc().ok_or(format!(
+                "Invalid Bcalm: Unitig {} does not have a description",
+                unitig_id
+            ))?;
+            let unitig_seq = record.seq();
+    
+            if current_id != unitig_id {
+                return Err(format!("Invalid bcalm: Unitigs must be indexed sequentially, starting at 0. Expected {}, got {}", 
+                          current_id, unitig_id).into());
+            }
+    
+            // Parse record into UnitigMetadata
+            let mut unitig = UnitigMetadata::from_unitig_header(&unitig_desc)?;
+            unitig.seq = Vec::with_capacity(unitig.length as usize);
+            unitig.seq.extend_from_slice(unitig_seq);
+    
+            // Add metadata to graph
+            metadata.push(unitig);
+            current_id += 1;
+        }
+        Ok(metadata)
+    }
 }
 
 #[cfg(test)]
@@ -111,7 +139,7 @@ mod tests {
     use std::time::Instant;
 
     #[test]
-    fn parse_header() -> Result<(), Box<dyn std::error::Error>> {
+    fn parse_unitig_header() -> Result<(), Box<dyn std::error::Error>> {
         let line = ">0 LN:i:100 KC:i:1 L:+:1:+";
         let unitig = UnitigMetadata::from_unitig_header(line)?;
         let expected = UnitigMetadata {
@@ -133,12 +161,12 @@ mod tests {
     }
 
     #[test]
-    fn time_for_whole_graph() -> Result<(), Box<dyn std::error::Error>> {
-        let path_graph = "../data/ggcat_output/chr1.fna";
+    fn time_parse_graph() -> Result<(), Box<dyn std::error::Error>> {
+        let path_graph = "data/ggcat_output/chr1.fna";
         let start = Instant::now();
-        let _metadata = metadata_from_fasta(path_graph)?;
+        let _metadata = GraphMetadata::from_fasta(path_graph)?;
         let duration = start.elapsed();
-        println!("Time taken to parse bcalm: {:?}", duration);
+        println!("  Time to parse metadata: {:?}", duration);
         Ok(())
     }
 }

@@ -8,7 +8,7 @@ pub struct KmerLookup {
 }
 
 impl KmerLookup {
-    pub fn from_graph(metadata: &GraphMetadata, k: usize) -> Result<KmerLookup, nthash::Error> {
+    pub fn from_graph(metadata: &GraphMetadata, k: usize) -> Result<KmerLookup, Box<dyn std::error::Error>> {
         let mut lookup = HashMap::new();
 
         // Estimate capacity for better performance
@@ -25,7 +25,10 @@ impl KmerLookup {
             let nthash_iter = NtHashIterator::new(&unitig.seq, k)?;
 
             for hash in nthash_iter {
-                lookup.insert(hash, unitig_id);
+                let old_value = lookup.insert(hash, unitig_id);
+                if old_value.is_some() {
+                    return Err("Duplicate k-mer hash".into());  // TODO: handle hash collision
+                }
             }
         }
 
@@ -45,28 +48,28 @@ mod tests {
 
     #[test]
     fn test_kmer_lookup() -> Result<(), Box<dyn std::error::Error>> {
-        let path_graph = "../data/ggcat_output/chr1.fna";
+        let path_graph = "data/ggcat_output/chr1.fna";
         let k = 31;
         let kmer = b"GCCCCCCTTCATTTTCTAGCGATTCAAGCGC";
         let expected_id: usize = 4;
 
         // Parse metadata
         let start = Instant::now();
-        let metadata = crate::metadata::metadata_from_fasta(path_graph)?;
+        let metadata = GraphMetadata::from_fasta(path_graph)?;
         let duration = start.elapsed();
-        println!("Time to parse metadata: {:?}", duration);
+        println!("  Time to parse metadata: {:?}", duration);
 
         // Create lookup table
         let start = Instant::now();
         let lookup = KmerLookup::from_graph(&metadata, k)?;
         let duration = start.elapsed();
-        println!("Time to create lookup table: {:?}", duration);
+        println!("  Time to create lookup table: {:?}", duration);
 
         // Perform lookup
         let start = Instant::now();
         let unitig_id = lookup.lookup(kmer).unwrap();
         let duration = start.elapsed();
-        println!("Time to lookup k-mer: {:?}", duration);
+        println!("  Time to lookup k-mer: {:?}", duration);
         assert_eq!(unitig_id, expected_id);
         Ok(())
     }
