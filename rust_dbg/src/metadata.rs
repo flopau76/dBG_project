@@ -161,8 +161,9 @@ mod tests {
     }
 
     #[test]
+    #[ignore="Graph construction also is tested in lookup.rs"]
     fn time_parse_graph() -> Result<(), Box<dyn std::error::Error>> {
-        let path_graph = "data/ggcat_output/chr1.fna";
+        let path_graph = "data/graph_chr1_k31.fna";
         let start = Instant::now();
         let _metadata = GraphMetadata::from_fasta(path_graph)?;
         let duration = start.elapsed();

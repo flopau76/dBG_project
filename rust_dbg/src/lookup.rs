@@ -48,7 +48,7 @@ mod tests {
 
     #[test]
     fn test_kmer_lookup() -> Result<(), Box<dyn std::error::Error>> {
-        let path_graph = "data/ggcat_output/chr1.fna";
+        let path_graph = "data/graph_chr1_k31.fna";
         let k = 31;
         let kmer = b"GCCCCCCTTCATTTTCTAGCGATTCAAGCGC";
         let expected_id: usize = 4;
