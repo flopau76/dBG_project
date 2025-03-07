@@ -136,7 +136,6 @@ impl GraphMetadata {
 mod tests {
     use super::*;
     use arrayvec::ArrayVec;
-    use std::time::Instant;
 
     #[test]
     fn parse_unitig_header() -> Result<(), Box<dyn std::error::Error>> {
@@ -157,16 +156,6 @@ mod tests {
             seq: Vec::new(),
         };
         assert_eq!(unitig, expected);
-        Ok(())
-    }
-
-    #[test]
-    fn time_parse_graph() -> Result<(), Box<dyn std::error::Error>> {
-        let path_graph = "data/ggcat_output/chr1.fna";
-        let start = Instant::now();
-        let _metadata = GraphMetadata::from_fasta(path_graph)?;
-        let duration = start.elapsed();
-        println!("  Time to parse metadata: {:?}", duration);
         Ok(())
     }
 }
