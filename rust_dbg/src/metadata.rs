@@ -136,7 +136,6 @@ impl GraphMetadata {
 mod tests {
     use super::*;
     use arrayvec::ArrayVec;
-    use std::time::Instant;
 
     #[test]
     fn parse_unitig_header() -> Result<(), Box<dyn std::error::Error>> {
