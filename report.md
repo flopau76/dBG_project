@@ -82,3 +82,16 @@ __________________
 
 __________________
 ### Fait durant la semaine du 28/02 au 06/03
+- début code rust: recherche crate pour manipuler les kmers; structure basique
+
+
+
+
+## Comparaison crates rust
+#### Ragnar Groot: packed-seq, ptr-hash, simd-minimizers
++crates très optimisées  
+-super pointu ->dur d'utilisation 
+
+#### debruijn
++du consortium 10X genomics; beaucoup d'utilisateurs  
++pas mal de fonctionnalités rassemblés en un seul lieu

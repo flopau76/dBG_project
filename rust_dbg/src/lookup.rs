@@ -8,8 +8,8 @@ pub struct KmerLookup {
 }
 
 impl KmerLookup {
-    /// Create a new KmerLookup from a sequence
-    /// The first occurence of a kmer in the sequence is stored in the table
+    /// Creates a new KmerLookup from a sequence (for testing mainly).
+    /// The first occurence of a kmer in the sequence is stored in the table.
     pub fn from_seq(seq: &[u8], k: usize) -> Result<KmerLookup, Box<dyn std::error::Error>> {
         let mut lookup = HashMap::new();
 
@@ -29,8 +29,8 @@ impl KmerLookup {
         Ok(KmerLookup {k, lookup })
     }
 
-    /// Create a new KmerLookup from a GraphMetadata
-    /// The value of a kmer in the table correspond to its index in the GraphMetadata
+    /// Create a new KmerLookup from a GraphMetadata.
+    /// The value of a kmer in the table correspond to its index in the GraphMetadata.
     pub fn from_graph(metadata: &GraphMetadata, k: usize) -> Result<KmerLookup, Box<dyn std::error::Error>> {
         let mut lookup = HashMap::new();
 
@@ -57,15 +57,15 @@ impl KmerLookup {
         Ok(KmerLookup {k, lookup })
     }
 
-    /// Lookup a kmer in the table
+    /// Lookup a kmer in the table.
     pub fn get_kmer(&self, kmer: &[u8]) -> Option<usize> {
         // note: no error checking to assert that kmer has the correct size
         let hash = nthash::ntc64(kmer, 0, self.k);
         self.lookup.get(&hash).copied()
     }
 
-    /// Lookup all the kmers in the table
-    /// Returns a vector containing the unitig ids of all present kmers
+    /// Lookup all the kmers in the table.
+    /// Returns a vector containing the unitig ids of all the present kmers.
     pub fn get_kmers(&self, seq: &[u8]) -> Vec<usize> {
         let mut unitig_ids = Vec::new();
         let nthash_iter = NtHashIterator::new(seq, self.k).unwrap();
