@@ -6,7 +6,4 @@ edition = "2024"
 [dependencies]
 bio = "1"
 debruijn = "0.3.4"
-
-nthash = "0.5.1"
-arrayvec = "0.7.6"
-memmap2 = "0.9.5"
+boomphf = "0.5.9"

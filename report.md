@@ -95,3 +95,8 @@ __________________
 #### debruijn
 +du consortium 10X genomics; beaucoup d'utilisateurs  
 +pas mal de fonctionnalités rassemblés en un seul lieu
+-dnaseq encoded as u8 ?
+-pas possible d'itérer directement sur les kmer canoniques
+
+#### bio-seq
++very well documented
