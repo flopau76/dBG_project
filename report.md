@@ -84,19 +84,28 @@ __________________
 ### Fait durant la semaine du 28/02 au 06/03
 - début code rust: recherche crate pour manipuler les kmers; structure basique
 
+__________________
+### Fait durant la semaine du 28/02 au 06/03
+- poursuite code
+- étude sshash: article/structure utilisée très intéressant. mais pas d'implémentation rust -> on reste sur du plus basique
 
 
 
 ## Comparaison crates rust
 #### Ragnar Groot: packed-seq, ptr-hash, simd-minimizers
 +crates très optimisées  
--super pointu ->dur d'utilisation 
+-super pointu -> dur d'utilisation  
+-bcp de crates différentes -> pb de compatibilités entre elles; certaines seulement sur git et pas crates.io
 
 #### debruijn
 +du consortium 10X genomics; beaucoup d'utilisateurs  
 +pas mal de fonctionnalités rassemblés en un seul lieu
--dnaseq encoded as u8 ?
 -pas possible d'itérer directement sur les kmer canoniques
 
-#### bio-seq
-+very well documented
+#### rust-bio
++very well documented and widely used  
++-lots of functionalities, in a wide range of applications, but nothing very specific
+
+#### needletail: for fasta parsing and kmer streaming
++easy to use  
++slightly faster than bio reader

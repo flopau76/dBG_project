@@ -5,5 +5,8 @@ edition = "2024"
 
 [dependencies]
 bio = "1"
+needletail = "0.6.3"
 debruijn = "0.3.4"
-boomphf = "0.5.9"
+boomphf = { version = "0.6.0", features = ["serde"] }
+serde = "^1"
+bincode = { version = "^2", features = ["serde"] }
