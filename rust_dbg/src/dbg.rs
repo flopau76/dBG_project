@@ -92,6 +92,7 @@ impl<K: Kmer> Graph<K> {
     }
 }
 
+// parallel implementation
 impl <K:Kmer + Send + Sync> Graph<K> {
         /// Calculates the extensions of the kmers
         fn compute_exts_parallel(kmers: &BoomHashMap<K, ()>, canon: bool) -> Vec<Exts> {

@@ -135,15 +135,42 @@ mod unit_test {
     static PATH : &str = "data/test.fna";
 
     #[test]
-    fn test_read_file() {
+    fn test_nucleo() {
         let iter = NucleoIterator::new(PATH).unwrap();
         let seq: Vec<char> = iter.map(|b  |{b as char}).collect();
         println!("{:?}", seq);
     }
     #[test]
     fn test_kmers() {
-        let iter = KmerIterator::<Kmer3>::new(PATH, true).unwrap();
+        let iter = KmerIterator::<Kmer3>::new(PATH, false).unwrap();
         let kmers: Vec<Kmer3> = iter.map(|b| b.0).collect();
         println!("{:?}", kmers);
+    }
+}
+
+#[cfg(test)]
+mod tests_time {
+    use super::*;
+    use debruijn::kmer;
+    use std::time::Instant;
+
+    static PATH: &str = "data/AalbF5_chr1.fna";
+    type Kmer31 = kmer::VarIntKmer<u64, kmer::K31>;
+
+    // On laptop:
+    // Time to walk graph: 42.117445043s
+    // Nb of kmers: 337_698_822
+    #[test]
+    fn walk_graph() {
+        let start = Instant::now();
+        let kmer_iter = KmerIterator::<Kmer31>::new(PATH, false).unwrap();
+        let mut nb_kmers = 0;
+        for kmer in kmer_iter {
+            nb_kmers += 1;
+        }
+        let duration = start.elapsed();
+        println!("Time to walk graph: {:?}", duration);
+        println!("Nb of kmers: {}", nb_kmers);
+
     }
 }
