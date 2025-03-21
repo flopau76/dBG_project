@@ -1,23 +1,27 @@
-use std::io::{ BufReader, BufRead, Result};
-use std::fs::{File};
+use std::io::{BufReader, BufRead, Result};
+use std::fs::File;
 use std::path::Path;
 
-use debruijn::{complement, Kmer, dna_only_base_to_bits};
-use debruijn::{Exts, Dir};
+use debruijn::{Kmer, complement, dna_only_base_to_bits};
 
+/// Iterator over the nucleotides of a fasta file
+/// Return a single char '>' for each header line
 struct NucleoIterator {
     reader: BufReader<File>,
     buffer: Vec<u8>,
     cur_pos: usize,
+    nb_remaining: usize,
 }
 
 impl NucleoIterator {
     fn new(path: impl AsRef<Path>) -> Result<Self> {
         let file = File::open(path)?;
+        let file_size = file.metadata()?.len() as usize;
         Ok(Self {
             reader: BufReader::new(file),
             buffer: Vec::new(),
             cur_pos: 0,
+            nb_remaining: file_size,
         })
     }
 }
@@ -43,6 +47,7 @@ impl Iterator for NucleoIterator {
                 if !self.buffer.is_empty() && self.buffer[0] == b'>' {
                     // Return a single char '>' and skip the rest of the line
                     self.cur_pos = self.buffer.len();
+                    self.nb_remaining -= self.buffer.len();
                     return Some(b'>');
                 }
             }
@@ -51,6 +56,7 @@ impl Iterator for NucleoIterator {
             if self.cur_pos < self.buffer.len() {
                 let c = self.buffer[self.cur_pos];
                 self.cur_pos += 1;
+                self.nb_remaining -= 1;
                 
                 // Skip whitespace and newlines
                 if !c.is_ascii_whitespace() {
@@ -58,8 +64,15 @@ impl Iterator for NucleoIterator {
                 }
             } else {
                 self.cur_pos += 1;
+                self.nb_remaining -= 1;
             }
         }
+    }
+
+    /// Return the number of remaining bytes in the fasta file
+    /// note: upper bound is correct, lower bound is not as we skip fasta headers and newlines 
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.nb_remaining, Some(self.nb_remaining))
     }
 }
 
@@ -72,7 +85,7 @@ pub struct KmerIterator<K: Kmer> {
 }
 
 impl<K: Kmer> KmerIterator<K> {
-    fn new(path: impl AsRef<Path>, canonical: bool) -> Result<Self> {
+    pub fn new(path: impl AsRef<Path>, canonical: bool) -> Result<Self> {
         let nucleo_iter = NucleoIterator::new(path)?;
         Ok(Self {
             canonical,
@@ -124,6 +137,13 @@ impl<K: Kmer> Iterator for KmerIterator<K> {
             Some((self.cur_kmer, false))
         }
     }
+
+    /// Return the number of remaining bytes in the fasta file
+    /// note: upper bound is correct, lower bound is not as we skip newlines and fasta headers,
+    /// as well as non valid kmers (containing N)
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.nucleo_iter.size_hint()
+    }
 }
 
 #[cfg(test)]
@@ -133,18 +153,19 @@ mod unit_test {
     use debruijn::kmer::Kmer3;
 
     static PATH : &str = "data/test.fna";
+    // TODO: proper unit tests
 
     #[test]
     fn test_nucleo() {
         let iter = NucleoIterator::new(PATH).unwrap();
-        let seq: Vec<char> = iter.map(|b  |{b as char}).collect();
-        println!("{:?}", seq);
+        let _seq: Vec<char> = iter.map(|b  |{b as char}).collect();
+        // println!("{:?}", seq);
     }
     #[test]
     fn test_kmers() {
         let iter = KmerIterator::<Kmer3>::new(PATH, false).unwrap();
-        let kmers: Vec<Kmer3> = iter.map(|b| b.0).collect();
-        println!("{:?}", kmers);
+        let _kmers: Vec<Kmer3> = iter.map(|b| b.0).collect();
+        // println!("{:?}", kmers);
     }
 }
 
@@ -157,15 +178,14 @@ mod tests_time {
     static PATH: &str = "data/AalbF5_chr1.fna";
     type Kmer31 = kmer::VarIntKmer<u64, kmer::K31>;
 
-    // On laptop:
-    // Time to walk graph: 42.117445043s
+    // Time to walk graph: 16.971993846s
     // Nb of kmers: 337_698_822
     #[test]
     fn walk_graph() {
         let start = Instant::now();
         let kmer_iter = KmerIterator::<Kmer31>::new(PATH, false).unwrap();
         let mut nb_kmers = 0;
-        for kmer in kmer_iter {
+        for _kmer in kmer_iter {
             nb_kmers += 1;
         }
         let duration = start.elapsed();

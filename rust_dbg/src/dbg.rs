@@ -1,34 +1,20 @@
-use needletail::{parse_fastx_file, Sequence};
+use crate::kmers::KmerIterator;
 
 use debruijn::{complement, Kmer};
 use debruijn::{Exts, Dir};
 
-use boomphf::hashmap::BoomHashMap;
+use boomphf::Mphf;
 use serde::{Deserialize, Serialize};
-
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-
-/// get all kmers of a fasta file
-pub fn get_kmers<K: Kmer>(path: &str, canon: bool) -> Vec<K> {
-    let mut reader = parse_fastx_file(path).unwrap();
-    let mut kmers = Vec::new();
-
-    while let Some(record) =  reader.next() {
-        let seq = record.unwrap();
-        for (_k1, (kmer, _k2), _rc) in seq.bit_kmers(K::k() as u8, canon) {
-            kmers.push(K::from_u64(kmer));
-        }
-    }
-    kmers
-}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Graph<K: Kmer> {
-    kmers: BoomHashMap<K, ()>,
+    mphf: Mphf<K>,
+    kmers: Vec<K>,
     exts: Vec<Exts>,
     canon: bool,
 }
 
+/// Basic methods for graph manipulation
 impl<K: Kmer> Graph<K> {
     pub fn len(&self) -> usize {
         self.kmers.len()
@@ -36,7 +22,13 @@ impl<K: Kmer> Graph<K> {
 
     /// returns the id of the kmer if it exists, None otherwise
     pub fn get_key_id(&self, kmer: &K) -> Option<usize> {
-        self.kmers.get_key_id(kmer)
+        let pos = self.mphf.try_hash(kmer)?;
+        let hashed_kmer = &self.kmers[pos as usize];
+        if kmer == hashed_kmer {
+            Some(pos as usize)
+        } else {
+            None
+        }
     }
 
     /// returns a ref to the data associated to the id
@@ -48,13 +40,37 @@ impl<K: Kmer> Graph<K> {
     pub fn get_exts_mut(&mut self, id: usize) -> &mut Exts {
         &mut self.exts[id]
     }
+}
 
-    // compute all edges of a stranded de Bruijn graph
-    fn compute_exts(kmers: &BoomHashMap<K, ()>, canon: bool) -> Vec<Exts> {
-        let mut exts = vec![Exts::empty(); kmers.len()];
+/// Methods to construct the graph
+impl<K: Kmer> Graph<K> {
+    // reorder the keys according to the Mphf
+    fn reorder_kmers(kmers: &mut Vec<K>, mphf: &Mphf<K>) {
+        for i in 0..kmers.len() {
+            loop {
+                let kmer_slot = mphf.hash(&kmers[i]) as usize;
+                if i == kmer_slot {
+                    break;
+                }
+                kmers.swap(i, kmer_slot);
+            }
+        }
+    }
+
+    /// initialize the graph from a fasta file
+    pub fn init_from_fasta(path: &str, canon: bool) -> Self {
+        let mut kmers: Vec<K> = KmerIterator::<K>::new(path, canon).unwrap().map(|x|x.0).collect();
+        let capacity = kmers.len();
+        let mphf = Mphf::new(1.7, &kmers); // TODO: look at the paper for correct gamma factor
+        Self::reorder_kmers(&mut kmers, &mphf);
+        Self {mphf, kmers, exts: vec![Exts::empty(); capacity], canon}
+    }
+
+    /// compute all edges of a stranded de Bruijn graph
+    pub fn update_exts(&mut self) {
         // iterate over the kmers
-        for (kmer_id, (kmer, _)) in kmers.iter().enumerate() {
-            let mut new_exts = exts[kmer_id];
+        for (kmer_id, kmer) in self.kmers.iter().enumerate() {
+            let mut new_exts = *self.get_exts(kmer_id);
             // iterate over the 8 neighbors
             for &dir in [Dir::Left, Dir::Right].iter() {
                 let removed_base = match dir {
@@ -62,70 +78,30 @@ impl<K: Kmer> Graph<K> {
                     Dir::Right => kmer.get(0)
                 };
                 for added_base in 0..4 {
-                    let (neighbor, flip) = if canon {kmer.extend(added_base, dir).min_rc_flip()} else {(kmer.extend(added_base, dir), false)};
+                    let (neighbor, flip) = if self.canon {kmer.extend(added_base, dir).min_rc_flip()} else {(kmer.extend(added_base, dir), false)};
                     // only lookup once each pair (kmer, neighbor)
                     if *kmer < neighbor { continue; }
                     if *kmer == neighbor { new_exts = new_exts.set(dir, added_base); continue; }
                     // check if the neighbor is in the set
-                    if let Some(neighbor_id) = kmers.get_key_id(&neighbor) {
+                    if let Some(neighbor_id) = self.get_key_id(&neighbor) {
                         // update the kmer
                         new_exts = new_exts.set(dir, added_base);
                         // update the neighbor (beware if it is reversed)
-                        let mut neighbor_exts = &mut exts[neighbor_id];
+                        let neighbor_exts = &mut self.exts[neighbor_id];
                         if !flip { *neighbor_exts = neighbor_exts.set(dir.flip(), removed_base); }
                         else { *neighbor_exts = neighbor_exts.set(dir, complement(removed_base)); }
                     }
                 }
             }
-            exts[kmer_id] = new_exts;
+            self.exts[kmer_id] = new_exts;
         }
-        exts
     }
 
     /// initialize the graph from a fasta file and compute the edges
     pub fn from_fasta(path: &str, canon: bool) -> Self {
-        let kmers_vec = get_kmers(path, canon);
-        let nb_kmers = kmers_vec.len();
-        let kmers = BoomHashMap::new(kmers_vec, vec![(); nb_kmers]);
-        let exts = Self::compute_exts(&kmers, canon);
-        Self {kmers, exts, canon}
-    }
-}
-
-// parallel implementation
-impl <K:Kmer + Send + Sync> Graph<K> {
-        /// Calculates the extensions of the kmers
-        fn compute_exts_parallel(kmers: &BoomHashMap<K, ()>, canon: bool) -> Vec<Exts> {
-            // iterate (in parallel) over the kmers and compute the extensions
-            let new_exts: Vec<_> = kmers.par_iter()
-                .map(|(kmer, _)| {
-                    let mut new_exts = Exts::empty();
-                    
-                    // iterate over the 8 neighbors
-                    for &dir in [Dir::Left, Dir::Right].iter() {
-                        for added_base in 0..4 {
-                            let neighbor = if canon { kmer.extend(added_base, dir).min_rc()}
-                                else { kmer.extend(added_base, dir) };
-                            // check if the neighbor is in the set
-                            if kmers.get_key_id(&neighbor).is_some() {
-                                new_exts = new_exts.set(dir, added_base);
-                            }
-                        }
-                    }
-                    new_exts
-                })
-                .collect();
-            new_exts
-        }
-
-
-    /// initialize the graph from a fasta file and compute the edges
-    pub fn from_fasta_parallel(path: &str, canon: bool) -> Self {
-        let kmers_vec = get_kmers(path, canon);
-        let nb_kmers = kmers_vec.len();
-        let kmers = BoomHashMap::new_parallel(kmers_vec, vec![(); nb_kmers]);
-        let exts = Self::compute_exts_parallel(&kmers, canon);
-        Self {kmers, exts, canon}
+        let mut graph = Self::init_from_fasta(path, canon);
+        graph.update_exts();
+        graph
     }
 }
 
@@ -133,8 +109,9 @@ impl <K:Kmer + Send + Sync> Graph<K> {
 mod unit_test {
     use super::*;
 
-    use debruijn::Mer;
+    use boomphf::hashmap::BoomHashMap;
 
+    use debruijn::Mer;
     use debruijn::kmer::Kmer3;
 
     use std::io::Write;
@@ -149,6 +126,7 @@ mod unit_test {
     }
 
     static SEQ : &str = "CGTAA";
+
     fn expected_result(canon: bool) -> BoomHashMap<Kmer3, Exts> {
         let kmers = vec![
             if !canon {Kmer3::from_ascii(b"CGT")} else {Kmer3::from_ascii(b"CGT").rc() },
@@ -177,7 +155,7 @@ mod unit_test {
     fn test_from_fasta() {
         for &canon in [true, false].iter() {
             let expected = expected_result(canon);
-            let mut obtained = Graph::<Kmer3>::from_fasta(PATH, canon);
+            let obtained = Graph::<Kmer3>::from_fasta(PATH, canon);
             assert_eq!(obtained.len(), expected.len());
             for (&kmer_e, &exts_e) in expected.iter() {
                 // check that the kmer is present
@@ -195,43 +173,34 @@ mod tests_time {
     use super::*;
     use debruijn::kmer;
 
-    use std::time::{Instant, Duration};
+    use std::time::Instant;
 
     static PATH: &str = "data/unitigs_chr1_k31.fna";
     type Kmer31 = kmer::VarIntKmer<u64, kmer::K31>;
 
-    fn time_closure<F: Fn()->()> (f: F) -> Duration
-    {
+    fn time_from_fasta(canon: bool) {
         let start = Instant::now();
-        f();
-        start.elapsed()
+        let mut graph = Graph::<Kmer31>::init_from_fasta(PATH, canon);
+        let duration = start.elapsed();
+        println!("Time to initialize graph: {:?}", duration);
+
+        let start = Instant::now();
+        graph.update_exts();
+        let duration = start.elapsed();
+        println!("Time to update exts: {:?}", duration);
     }
 
-    // // 622s
-    // #[test]
-    // fn time_init_non_canon() {
-    //     let duration = time_closure(||-> () {Graph::<Kmer31>::init_from_fasta(PATH, false);});
-    //     println!("Time to get non canonical kmers: {:?}", duration);
-    // }
+    // Time to initialize graph: 576.703851699s
+    // Time to update exts: 1192.2858803s
+    #[test]
+    fn time_no_canon() {
+        time_from_fasta(false);
+    }
 
-    // // 627s
-    // #[test]
-    // fn time_init_canon() {
-    //     let duration = time_closure(||-> () {Graph::<Kmer31>::init_from_fasta(PATH, true);});
-    //     println!("Time to get canonical kmers: {:?}", duration);
-    // }
-
-    // // 1860s
-    // #[test]
-    // fn time_non_canon() {
-    //     let duration = time_closure(||-> () {Graph::<Kmer31>::from_fasta(PATH, false);});
-    //     println!("Time to get non canonical graph: {:?}", duration);
-    // }
-
-    // // 1890s
-    // #[test]
-    // fn time_canon() {
-    //     let duration = time_closure(||-> () {Graph::<Kmer31>::from_fasta(PATH, true);});
-    //     println!("Time to get canonical graph: {:?}", duration);
-    // }
+    // Time to initialize graph: 591.076039135s
+    // Time to update exts: 1209.704250992s
+    #[test]
+    fn time_canon() {
+        time_from_fasta(true);
+    }
 }
