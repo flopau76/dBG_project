@@ -1,6 +1,6 @@
 # Compte rendu des réunions
 
-## Réunion du 12/02
+## Réunion 12/02
 
 Organisation générale:
 - réunion hebdomadaire de 1h-1h30, à priori le jeudi
@@ -18,7 +18,7 @@ Ajouter des infos aux graphes de Bruijn (dBG) (colorés ou pas ?) pour permettre
 - [ ] prise en main nextflow
 
 __________________
-### Fait durant la semaine 10/02-19/02:
+### 10/02-19/02:
 - formation sécurité
 - lecture d'articles: intérêt et utilisation des pangénomes; comparaison de méthodes; implémentation de méthodes (pggb, gccat, mac-dBG)
 - lecture Rust book + tutos
@@ -30,7 +30,7 @@ __________________
     - pertinence ? 97% des scaffolds sont déjà placés -> mieux vaut utiliser les indications du fasta
 
 __________________
-## Réunion du 20/02
+## Réunion 20/02
 
 Réflexion sur les métriques associés au dBG:
 - nb de noeud
@@ -63,7 +63,7 @@ Autre:
     - [ ] ajouter des infos pour améliorer le score
 
 __________________
-### Fait durant la semaine du 21/02 au 27/02
+### 21/02 au 27/02
 - lecture documentation:
     - smoothxg
     - odgi
@@ -74,20 +74,36 @@ __________________
     - ggcat -> juste le set de kmers (peut encore être comprimé avec matchtig et eulertig)
 
 __________________
-## Réunion du 27/02
+## Réunion 27/02
 - comparer la taille des fichiers permettant / ne permettant pas de reconstruire un haplotype. Dans les deux cas, prendre la version la plus épurée, mais non compressée possible
 - pour mesurer la reconstructibilité des haplotypes: regarder le nb de "breakpoints" le long d'un haplotype
     - pour les gfa: 0
     - pour les dBG: beaucoup (↘ avec k, ↗ avec le nb de genomes)
 
 __________________
-### Fait durant la semaine du 28/02 au 06/03
+### 28/02 au 06/03
 - début code rust: recherche crate pour manipuler les kmers; structure basique
+- comparaison taille fichier (texte) unitigs/matchtigs/vg
 
 __________________
-### Fait durant la semaine du 28/02 au 06/03
-- poursuite code
-- étude sshash: article/structure utilisée très intéressant. mais pas d'implémentation rust -> on reste sur du plus basique
+### 07/03 au 21/03
+- article sshash: hash pour la query efficiente des kmers. pas d'implémentation rust -> on reste sur du plus basique
+- poursuite code rust: prototype qui construit le graphe et parcourt les haplotypes
+
+__________________
+## Réunion 21/03
+- mêtriques à regarder:
+    - % de breackpoint, fenêtres glissantes
+    - % de edges non utilisés
+- 3 origines (a minima) aux breackpoints:
+    - SNP et compagnie -> comparer le nb de edges en ajoutant un haplo
+    - répétitions
+    - (k-1) overlap non présent dans les séquence -> comparer graphes pour k et k+1
+- lever les indéterminations: quel infos ajouter ?
+    - checkpoints -> Djikistra
+    - railway switches
+    - forbidden intersections  
+L'intérêt des checkpoints: méthode mixte, hiérachique. on peut utiliser différentes techniques pour différentes portions
 
 
 
