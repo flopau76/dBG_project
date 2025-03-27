@@ -4,9 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-needletail = "0.6.3"
 debruijn = "0.3.4"
-
 boomphf = { version = "0.6.0", features = ["serde"] }
 
 serde = "^1"

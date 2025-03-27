@@ -1,2 +1,5 @@
-existing_tools/
 other/
+
+data/*
+!data/aedes.reg
+!data/get_data.sh
