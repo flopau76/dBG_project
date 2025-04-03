@@ -1,5 +1,2 @@
-other/
-
-data/*
-!data/aedes.reg
-!data/get_data.sh
+data/input
+data/output
