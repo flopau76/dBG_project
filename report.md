@@ -105,7 +105,23 @@ __________________
     - forbidden intersections  
 L'intérêt des checkpoints: méthode mixte, hiérachique. on peut utiliser différentes techniques pour différentes portions
 
+__________________
+### 21/03 au 01/04
+- début implementation Breadth-first search:
+    - note: un même kmer (canonique) peut apparaitre deux fois dans le plus court chemin (une fois dans chaque sens)
+    - comment trouver le point d'arrivée optimal ? première idée: recherche dichotomique -> beaucoup trop long
+    - deuxième idée: lors du parcours en largeur, on énumère en même temps les kmers de l'haplotype, et on vérifie qu'ils sont bein dans la bonne profondeur
+    - troisième idée: notion de direction ? -> permettrait d'utiliser l'algo A*
+__________________
+## Réunion 01/04
+- mêtrique: **nb de breackpoints supplémentaires en ajoutant d'autres haplotypes**: exemple avec plusieurs haplo d'un chromosome humain
+- plus court chemin:
+    - Djikistra par les deux bouts -> réduit la complexité temporelle
+    - recherche dichotomique pour allonger un chemin au maximum
 
+__________________
+### 02/04 au ???
+suite BFS: ça marche pas. pour split de 1 à 16, chemin trouvé seulement pour 1, 5 et 13
 
 ## Comparaison crates rust
 #### Ragnar Groot: packed-seq, ptr-hash, simd-minimizers

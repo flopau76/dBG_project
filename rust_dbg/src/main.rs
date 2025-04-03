@@ -1,10 +1,12 @@
-pub mod dbg;
 pub mod fasta_reader;
+pub mod dbg;
 pub mod path;
 
-use debruijn::{kmer, Kmer};
-use dbg::Graph;
+use bincode::enc::write;
 use fasta_reader::FastaReader;
+use dbg::Graph;
+use debruijn::{kmer, Kmer, bits_to_ascii, Mer};
+use path::get_shortest_path;
 
 use std::fs::File;
 use std::io::{BufWriter, BufReader, Write};
@@ -12,38 +14,38 @@ use std::io::{BufWriter, BufReader, Write};
 use serde::{Serialize, Deserialize};
 use bincode::serde::{encode_into_std_write, decode_from_std_read};
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 #[allow(unused)]
 fn main() {
-    // input and output paths
+    // input files
     let path_graph = "../data/output/chr1/AalbF5_k31.fna";
-    let path_bin = "../data/output/chr1/graph_k31.bin";
+    let path_bin = "../data/output/chr1/AalbF5_k31.bin";
+    let path_haplo = "../data/input/chr1/AalbF5_splitN.fna";
 
-    let path_haplo_3 = "../data/input/chr1/AalbF3.fna";
-    let path_haplo_5 = "../data/input/chr1/AalbF5.fna";
-    let output_walk_3 = "../data/output/chr1_walk_AalbF3.txt";
-    let output_walk_5 = "../data/output/chr1_walk_AalbF5.txt";
+    let output_path = "../data/output/chr1/AalbF5_splitN.path.fna";
 
     // params used for kmer construction by ggcat
     let canon = true;
     type Kmer31 = kmer::VarIntKmer<u64, kmer::K31>;
 
-    let graph = make_graph_parallel::<Kmer31>(path_graph, canon);
+    // let graph = make_graph::<Kmer31>(path_graph, canon);
     // save_graph(&graph, path_bin);
+    let graph = load_graph::<Kmer31>(path_bin);
+    println!("{}", graph);
 
-    // let graph = load_graph::<Kmer31>(path_bin);
+    // let mut haplo = fasta_reader::FastaReader::new(path_haplo).unwrap()
+    // make_report(&graph, haplo, output_walk_5);
 
-    // let mut haplo_3 = fasta_reader::FastaReader::new(path_haplo_3).unwrap();
-    let mut haplo_5 = fasta_reader::FastaReader::new(path_haplo_5).unwrap();
-    make_report(&graph, haplo_5, output_walk_5);
+    let mut haplo = fasta_reader::FastaReader::new(path_haplo).unwrap();
+    get_path(&graph, &mut haplo, output_path);
 }
 
-fn make_graph_parallel<K: Kmer + Send + Sync>(path: &str, canon: bool) -> Graph<K> {
+fn make_graph<K: Kmer + Send + Sync>(path: &str, canon: bool) -> Graph<K> {
     print!("Creating graph (parallel)... ");
     std::io::stdout().flush().unwrap();
     let start = Instant::now();
-    let graph = dbg::Graph::<K>::from_fasta_parallel(path, canon);
+    let graph = dbg::Graph::<K>::from_unitigs(path, canon);
     let duration = start.elapsed();
     println!("done in {:?}", duration);
 
@@ -104,14 +106,17 @@ fn make_report<K: Kmer>(graph: &Graph<K>, mut haplo: FastaReader, output_walk: &
     let start = Instant::now();
     let nb_nodes = graph.len();
     let mut nb_edges: usize = 0;
+    let mut degree_histo = vec![0; 9];
     for id in 0..nb_nodes {
         let exts = *graph.get_exts(id);
-        nb_edges += (exts.num_exts_l() + exts.num_exts_r()) as usize;
+        let degree = (exts.num_exts_l() + exts.num_exts_r()) as usize;
+        nb_edges += degree;
+        degree_histo[degree] += 1;
     }
     nb_edges /= 2;
     let duration = start.elapsed();
     println!("done in {:?}", duration);
-    println!("Graph contains:\n  - {} nodes\n  - {} edges\n", nb_nodes, nb_edges);
+    println!("Graph contains:\n  - {} nodes\n  - {} edges\n  degree histogramm: {:?}", nb_nodes, nb_edges, degree_histo);
 
     // haplo stats
     print!("Iterating haplo... ");
@@ -121,8 +126,7 @@ fn make_report<K: Kmer>(graph: &Graph<K>, mut haplo: FastaReader, output_walk: &
     let mut junctions: usize = 0;
     let mut dead_ends: usize = 0;
 
-    let file = BufWriter::new(File::create(output_walk).unwrap());
-
+    // let file = BufWriter::new(File::create(output_walk).unwrap());
     while let Some(mut record) = haplo.next() {
         for (kmer, flip) in record.iter_kmers(graph.canon) {
             nb_kmers += 1;
@@ -141,4 +145,30 @@ fn make_report<K: Kmer>(graph: &Graph<K>, mut haplo: FastaReader, output_walk: &
     let duration = start.elapsed();
     println!("done in {:?}", duration);
     println!("Haplo contains:\n  - kmers: {}\n  - breakpoints: {}  (>1)\t\t{}  (<1)", nb_kmers, junctions, dead_ends);
+}
+
+fn get_path<K: Kmer>(graph: &Graph<K>, fasta_reader: &mut FastaReader, save_file: &str) {
+    println!("Looking for path in graph... ");
+    let mut file = BufWriter::new(File::create(save_file).unwrap());
+    let mut count: usize = 1;
+    while let Some(mut record) = fasta_reader.next() {
+        println!("Processing record: {}", record.header());
+        let start = Instant::now();
+        let mut kmer_iter = record.iter_kmers::<K>(graph.canon);
+        let (first_kmer, _) = kmer_iter.next().unwrap();
+        let (last_kmer, _) = kmer_iter.last().unwrap();
+        let path = get_shortest_path(graph, first_kmer, last_kmer);
+        if path.is_err() {
+            println!("  - no path found");
+            continue;
+        }
+        let path = path.unwrap();
+        let path_str = path.0.iter().map(|&b| bits_to_ascii(b) as char).collect::<String>();
+        writeln!(file, ">path_{}", count).unwrap();
+        writeln!(file, "{}", path_str).unwrap();
+        count += 1;
+        let duration = start.elapsed();
+        println!("  - path length: {}\n  - time elapsed: {:?}", path.len(), duration);
+        file.flush().unwrap();
+    }
 }

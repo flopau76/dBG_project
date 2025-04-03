@@ -29,6 +29,7 @@ impl FastaReader {
         if header_size == 0 {
             return None;
         }
+        header = header.trim_end().to_string();
         let sequence_start = self.buffer.stream_position().unwrap();
         Some(FastaRecord {
             reader: self,
@@ -285,7 +286,7 @@ mod unit_test {
 
     use debruijn::kmer::Kmer3;
 
-    static PATH : &str = "data/test.fna";
+    static PATH : &str = "test.fna";
 
     // TODO: proper unit tests
 
