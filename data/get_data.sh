@@ -39,10 +39,10 @@ seq 1 3 | while read i; do
 done
 
 #_______________________________________________________________________________
-# Split the sequences to remove Ns
+# Split the sequences into chunks separated by NNNs
 #_______________________________________________________________________________
 
-seqkit seq AalbF5.fna -w 0 | \
+seqkit seq input/chr1/AalbF5.fna -w 0 | \
     perl -pe 's/N+/\n>AalbF5#1#chr1\n/g' | \
     seqkit rename -1 | \
     seqkit seq -m 31  -o AalbF5_splitN.fna

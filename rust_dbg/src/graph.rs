@@ -79,7 +79,7 @@ impl<K: Kmer> Graph<K> {
     }
 }
 
-/// Methods to construct the graph
+/// Methods for graph construction
 impl<K: Kmer + Send + Sync> Graph<K> {
     // Reorder the kmers according to the Mphf
     fn reorder_kmers(kmers: &mut Vec<K>, mphf: &Mphf<K>) {
@@ -174,6 +174,7 @@ mod unit_test {
     use debruijn::Mer;
     use debruijn::kmer::Kmer3;
 
+    use core::hash;
     use std::io::Write;
     use std::fs::File;
 
@@ -225,7 +226,66 @@ mod unit_test {
         }
         std::fs::remove_file(PATH).unwrap();
     }
+
+    #[test]
+    fn compare_mphf() {
+        let n: usize = 300_000_000;
+        let nb_queries = 100_000_000;
+        let keys: Vec<usize> = (0..n).collect();
+
+        let start = std::time::Instant::now();
+        let mphf = Mphf::new(GAMMA, &keys);
+        let duration = start.elapsed();
+        println!("Time to create mphf: {:?}", duration);
+
+        let start = std::time::Instant::now();
+        for i in 0..nb_queries {
+            let key = i % n;
+            let _ = mphf.try_hash(&key);
+        }
+        let duration = start.elapsed();
+        println!("Time to query mphf (present): {:?}", duration);
+
+        let start = std::time::Instant::now();
+        for i in 0..nb_queries {
+            let key = i + n;
+            let _ = mphf.try_hash(&key);
+        }
+        let duration = start.elapsed();
+        println!("Time to query mphf (absent): {:?}", duration);
+
+        let start = std::time::Instant::now();
+        let hashset = std::collections::HashSet::<usize>::from_iter(keys.iter().cloned());
+        let end = start.elapsed();
+        println!("Time to create hashset: {:?}", end);
+
+        let start = std::time::Instant::now();
+        for i in 0..nb_queries {
+            let key = i % n;
+            let _ = hashset.contains(&key);
+        }
+        let duration = start.elapsed();
+        println!("Time to query hashset (present): {:?}", duration);
+
+        let start = std::time::Instant::now();
+        for i in 0..nb_queries {
+            let key = i + n;
+            let _ = hashset.contains(&key);
+        }
+        let duration = start.elapsed();
+        println!("Time to query hashset (absent): {:?}", duration);
+
+    }
 }
+
+// for integers keys between 0 and 300_000_000
+// total time over 100_000_000 queries
+// Time to create mphf: 133.744902417s
+// Time to query mphf (present): 30.222365836s
+// Time to query mphf (absent): 66.332115949s
+// Time to create hashset: 93.400747101s
+// Time to query hashset (present): 32.621489352s
+// Time to query hashset (absent): 23.975642417s
 
 
     // GAMMA = 1.7 for mphf; graph on chr1 for both haplotypes:

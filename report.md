@@ -119,9 +119,16 @@ __________________
     - Djikistra par les deux bouts -> réduit la complexité temporelle
     - recherche dichotomique pour allonger un chemin au maximum
 
+### 02/04 au 08/04
+- premier BFS fonctionnel: les chemins trouvés font ~1000 bases -> réfléxion sur le diamêtre du graphe
+- reflexion sur: comment découper l'haplotype en bouts les plus longs possible, pour que chaque bout corresponde à un parcout de plus court chemin ?
+
 __________________
-### 02/04 au ???
-suite BFS: ça marche pas. pour split de 1 à 16, chemin trouvé seulement pour 1, 5 et 13
+## Réunion du 08/04
+
+**TODO:**
+- court terme: git fonctionnel avec readme explicatif
+- moyen terme: decoupage haplotype en "plus court chemin par morceaux"
 
 ## Comparaison crates rust
 #### Ragnar Groot: packed-seq, ptr-hash, simd-minimizers

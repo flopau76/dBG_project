@@ -1,22 +1,45 @@
-use std::io::{BufReader, BufRead, Result, Seek};
+use std::io::{BufReader, BufRead, Result, Seek, SeekFrom};
 use std::fs::File;
 use std::path::Path;
+use std::slice::Iter;
 
 use debruijn::{Kmer, Exts, complement, dna_only_base_to_bits};
+
+use rayon::prelude::*;
+use std::sync::Arc;
+use std::cell::RefCell;
 
 /// Fasta reader
 pub struct FastaReader {
     buffer: BufReader<File>,
+    index: Vec<usize>,
+    path: Arc<Path>,
 }
 
 impl FastaReader {
     pub fn new(path: impl AsRef<Path>) -> Result<Self> {
-        let file = File::open(path)?;
-        Ok(Self{buffer: BufReader::new(file)})
-    }
+        let path = Arc::from(path.as_ref());
 
-    /// Position the buffer at the start of the next sequence
-    /// and return the corresponding record
+        let file = File::open(&path)?;
+        let mut buffer = BufReader::new(file);
+        
+        // Iterate once over the file to make the index
+        let mut index = Vec::new();
+        let mut pos: usize = 0;
+        let mut nb_bytes = buffer.skip_until(b'>').unwrap();
+        while nb_bytes > 0 {
+            pos += nb_bytes;
+            index.push(pos);
+            nb_bytes = buffer.read_until(b'>', &mut Vec::new()).unwrap();
+        }
+
+        // Rewind the buffer to the beginning
+        buffer.seek(SeekFrom::Start(0)).unwrap();
+
+        Ok(Self{buffer, index, path})
+    }
+    
+    /// Reads the next fasta record from the file
     pub fn next(&mut self) -> Option<FastaRecord> {
         // Skip until the next header
         match self.buffer.skip_until(b'>') {
@@ -24,47 +47,93 @@ impl FastaReader {
             Ok(_) => {}, 
             Err(_) => return None, // Error
         }
+        // Read the header line
         let mut header = String::new();
-        let header_size = self.buffer.read_line(&mut header).unwrap() as i64;
+        let header_size = self.buffer.read_line(&mut header).unwrap();
         if header_size == 0 {
             return None;
         }
         header = header.trim_end().to_string();
-        let sequence_start = self.buffer.stream_position().unwrap();
+
+        // Read the sequence
+        let mut sequence = Vec::new();
+        self.buffer.read_until(b'>', &mut sequence).unwrap();
+        if let Some(last) = sequence.last() {
+            if *last == b'>' {sequence.pop();}
+        }
+        sequence.retain(|&c| c != b'\n');
+
+        // Reposition the buffer at the start of the next seq header
+        self.buffer.seek_relative(-1).unwrap();
+
         Some(FastaRecord {
-            reader: self,
             header,
-            sequence_start,
+            sequence,
         })
     }
 }
 
-/// Sequence record associated with a FastaReader
-pub struct FastaRecord<'a> {
-    reader: &'a mut FastaReader,
-    header: String,
-    sequence_start: u64,
+impl Iterator for FastaReader {
+    type Item = FastaRecord;
+    
+    fn next(&mut self) -> Option<Self::Item> {
+        self.next()
+    }
 }
 
-impl FastaRecord<'_> {
-    pub fn iter_nucleotides(&mut self) -> NucleoIterator {
-        if self.reader.buffer.stream_position().unwrap() != self.sequence_start {
-            self.reader.buffer.seek(std::io::SeekFrom::Start(self.sequence_start)).unwrap();
-        }
-        NucleoIterator::new(self)
+/// Parallel iterator for FastaReader
+impl FastaReader {
+       pub fn par_iter(self) -> impl ParallelIterator<Item = FastaRecord> {
+        let path = self.path;
+        let index = self.index[0..(self.index.len()-1)].to_vec();
+
+        index.into_par_iter().map_init(
+            // Initialize a thread-local file handle
+            move || {
+                let file = File::open(&*path).unwrap();
+                RefCell::new(BufReader::new(file))
+            },
+            // Use the thread-local file handle for each chunk
+            |reader, start| {
+                // Get the file reader and position it at the start of the record
+                let mut reader = reader.borrow_mut();
+                reader.seek(SeekFrom::Start(start as u64)).unwrap();
+                
+                // Read the header line
+                let mut header = String::new();
+                reader.read_line(&mut header).unwrap();
+                let header = header.trim_end().to_string();
+                
+                // Read the sequence
+                let mut sequence = Vec::new();
+                reader.read_until(b'>', &mut sequence).unwrap();
+                if let Some(last) = sequence.last() {
+                    if *last == b'>' {sequence.pop();}
+                }
+                sequence.retain(|&c| c != b'\n');
+                                
+                FastaRecord { header, sequence }
+            }
+        )
+    }
+}
+
+/// Sequence record associated with a FastaReader
+pub struct FastaRecord {
+    header: String,
+    sequence: Vec<u8>,
+}
+
+impl FastaRecord {
+    pub fn iter_nucleotides(&self) -> Iter<'_, u8> {
+        self.sequence.iter()
     }
 
-    pub fn iter_kmers<K: Kmer>(&mut self, canonical: bool) -> KmerIterator<K> {
-        if self.reader.buffer.stream_position().unwrap() != self.sequence_start {
-            self.reader.buffer.seek(std::io::SeekFrom::Start(self.sequence_start)).unwrap();
-        }
+    pub fn iter_kmers<K: Kmer>(&self, canonical: bool) -> impl Iterator<Item = (K, bool)> {
         KmerIterator::new(self, canonical)
     }
 
-    pub fn iter_kmer_exts<K: Kmer>(&mut self, canonical: bool) -> KmerExtsIterator<K> {
-        if self.reader.buffer.stream_position().unwrap() != self.sequence_start {
-            self.reader.buffer.seek(std::io::SeekFrom::Start(self.sequence_start)).unwrap();
-        }
+    pub fn iter_kmer_exts<K: Kmer>(&self, canonical: bool) -> impl Iterator<Item = (K, bool, Exts)> {
         KmerExtsIterator::new(self, canonical)
     }
 
@@ -72,84 +141,24 @@ impl FastaRecord<'_> {
         &self.header
     }
 
-    pub fn sequence(&mut self) -> Vec<u8> {
-        self.iter_nucleotides().collect()
-    }
-}
-
-/// Iterator over the nucleotides of a sequence
-pub struct NucleoIterator<'a> {
-    reader: &'a mut FastaReader,
-    buffer: Vec<u8>,
-    cur_pos: usize,
-}
-
-impl<'a> NucleoIterator<'a> {
-    fn new(record: &'a mut FastaRecord) -> Self {
-        Self {
-            reader: record.reader,
-            buffer: Vec::new(),
-            cur_pos: 0,
-        }
-    }
-}
-
-impl<'a> Iterator for NucleoIterator<'a> {
-    type Item = u8;
-    
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            // If we've reached the end of the current line, read a new one
-            if self.cur_pos >= self.buffer.len() {
-                self.buffer.clear();
-                self.cur_pos = 0;
-                
-                // Read a new line into the buffer
-                let len_header = match self.reader.buffer.read_until(b'\n', &mut self.buffer) {
-                    Ok(0) => return None, // EOF
-                    Ok(i) => i as i64, 
-                    Err(_) => return None, // Error
-                };
-                
-                // If we reach the end of this sequence
-                if !self.buffer.is_empty() && self.buffer[0] == b'>' {
-                    // position the buffer at the start of the next seq and return None
-                    self.reader.buffer.seek_relative(-len_header).unwrap();
-                    return None;
-                }
-            }
-            
-            // Get the current byte
-            if self.cur_pos < self.buffer.len() {
-                let c = self.buffer[self.cur_pos];
-                self.cur_pos += 1;
-                
-                // Skip whitespaces and newlines
-                if !c.is_ascii_whitespace() {
-                    return Some(c);
-                }
-            } else {
-                self.cur_pos += 1;
-            }
-        }
+    pub fn sequence(&mut self) -> &Vec<u8> {
+        &self.sequence
     }
 }
 
 /// Iterator over the kmers of a sequence
 /// Skips all invalid kmers (containing non-ACGT characters)
 pub struct KmerIterator<'a, K: Kmer> {
-    canonical: bool,
-    nucleo_iter: NucleoIterator<'a>,
+    nucleo_iter: Iter<'a, u8>,
     cur_kmer: K,
     cur_kmer_rc: Option<K>,
     cur_count: usize,   // nb of valid bases in the current kmer
 }
 
 impl<'a, K: Kmer> KmerIterator<'a, K> {
-    fn new(record: &'a mut FastaRecord, canonical: bool) -> Self {
+    fn new(record: &'a FastaRecord, canonical: bool) -> Self {
         Self {
-            canonical,
-            nucleo_iter: NucleoIterator::new(record),
+            nucleo_iter: record.iter_nucleotides(),
             cur_kmer: K::empty(),
             cur_kmer_rc: if canonical {Some(K::empty())} else {None},
             cur_count: 0,
@@ -161,41 +170,37 @@ impl<K: Kmer> Iterator for KmerIterator<'_, K> {
     type Item = (K, bool);
 
     fn next(&mut self) -> Option<Self::Item> {
-        // Elongate the current kmer until it reaches k
+        // elongate the current kmer until it reaches k
         while self.cur_count < K::k() {
-            let base = self.nucleo_iter.next()?; {
-                // convert the base to a 2-bit representation
-                match dna_only_base_to_bits(base) {
-                    Some(nuc) => {
-                        self.cur_kmer = self.cur_kmer.extend_right(nuc);
-                        if let Some(rc) = self.cur_kmer_rc.as_mut() {
-                            *rc = rc.extend_left(complement(nuc));
-                        }
-                        self.cur_count += 1;
+            let &base = self.nucleo_iter.next()?;
+            // convert the base to a 2-bit representation
+            match dna_only_base_to_bits(base) {
+                Some(nuc) => {
+                    self.cur_kmer = self.cur_kmer.extend_right(nuc);
+                    if let Some(rc) = self.cur_kmer_rc.as_mut() {
+                        *rc = rc.extend_left(complement(nuc));
                     }
-                    // If we encounter a non-ACGT base (N), skip and reset the current kmer to 0
-                    None => {
-                        self.cur_kmer = K::empty();
-                        if let Some(rc) = self.cur_kmer_rc.as_mut() {
-                            *rc = K::empty();
-                        }
-                        self.cur_count = 0;
+                    self.cur_count += 1;
+                }
+                // If we encounter a non-ACGT base (N), skip and reset the current kmer to 0
+                None => {
+                    self.cur_kmer = K::empty();
+                    if let Some(rc) = self.cur_kmer_rc.as_mut() {
+                        *rc = K::empty();
                     }
+                    self.cur_count = 0;
                 }
             }
         }
         self.cur_count -= 1;
-        if self.canonical {
-            let rc = self.cur_kmer_rc.expect("Safe because canonical was computed");
-            let (kmer, flip) = if self.cur_kmer < rc {
-                (self.cur_kmer, false)
+        if let Some(rc)  = self.cur_kmer_rc {
+            if self.cur_kmer < rc {
+                return Some((self.cur_kmer, false));
             } else {
-                (rc, true)
+                return Some((rc, true));
             };
-            Some((kmer, flip))
-        } else {
-            Some((self.cur_kmer, false))
         }
+        return Some((self.cur_kmer, false));
     }
 }
 
@@ -203,19 +208,19 @@ impl<K: Kmer> Iterator for KmerIterator<'_, K> {
 /// Note: Will not work properly if the sequence contains non-ACGT characters
 pub struct KmerExtsIterator<'a, K: Kmer> {
     kmer_iter: KmerIterator<'a, K>,
+    left_ext: Exts,
     current_kmer: Option<(K, bool)>,
-    next_kmer: Option<(K, bool)>,
 }
 
 impl<'a, K: Kmer> KmerExtsIterator<'a, K> {
-    fn new(record: &'a mut FastaRecord, canonical: bool) -> Self {
+    fn new(record: &'a FastaRecord, canonical: bool) -> Self {
         let mut kmer_iter = KmerIterator::new(record, canonical);
-        let current_kmer = None;
-        let next_kmer = kmer_iter.next();
+        let left_ext = Exts::empty();
+        let current_kmer = kmer_iter.next();
         Self {
             kmer_iter,
+            left_ext,
             current_kmer,
-            next_kmer,
         }
     }
 }
@@ -224,60 +229,51 @@ impl<K: Kmer> Iterator for KmerExtsIterator<'_, K> {
     type Item = (K, bool, Exts);
 
     fn next(&mut self) -> Option<Self::Item> {
-        let prev_kmer: Option<(K, bool)>;  
-        (prev_kmer, self.current_kmer, self.next_kmer) = (self.current_kmer, self.next_kmer, self.kmer_iter.next());
-        let current_kmer = self.current_kmer?;
+        let (current_kmer, current_flip) = self.current_kmer?;
 
-
-        let left_ext = match prev_kmer {
-            Some((kmer, flip)) => {
-                let base = if !flip {kmer.get(0)} else {complement(kmer.get(K::k()-1))};
-                Exts::mk_left(base)
+        // get the rightmost base of the next kmer
+        let next_kmer = self.kmer_iter.next();
+        let right_ext = match next_kmer {
+            Some((next_kmer, next_flip)) => {
+                let right_base = if !next_flip {next_kmer.get(K::k()-1)} else {complement(next_kmer.get(0))};
+                Exts::mk_right(right_base)
             }
             None => Exts::empty(),
         };
-        let right_ext = match self.next_kmer {
-            Some((kmer, flip)) => {
-                let base = if !flip {kmer.get(K::k()-1)} else {complement(kmer.get(0))};
-                Exts::mk_right(base)
-            }
-            None => Exts::empty(),
-        };
-        let exts = Exts::merge(left_ext, right_ext);
-        if current_kmer.1 {
-            return Some((current_kmer.0, true, exts.rc()))
-        } else {
-            return Some((current_kmer.0, false, exts))
-        }
+
+        // merge the left and right extensions
+        let mut exts = Exts::merge(self.left_ext, right_ext);
+        if current_flip {exts = exts.rc();}
+
+        // update the left_ext for the next kmer
+        let left_base = if !current_flip {current_kmer.get(0)} else {complement(current_kmer.get(K::k()-1))};
+        self.left_ext = Exts::mk_left(left_base);
+        self.current_kmer = next_kmer;
+        
+        Some((current_kmer, current_flip, exts))
     }
 }
 
 pub fn get_kmers<K: Kmer>(path: &str, canon: bool) -> Vec<K> {
-    let mut fasta_reader = FastaReader::new(path).unwrap();
+    let fasta_reader = FastaReader::new(path).unwrap();
     let mut kmers = Vec::new();
 
-    while let Some(mut record) = fasta_reader.next() {
+    for record in fasta_reader {
         let kmer_iter = record.iter_kmers::<K>(canon);
-        for (kmer, _flip) in kmer_iter {
-            kmers.push(kmer);
-        }
+        kmers.extend(kmer_iter.map(|(kmer, _flip)| kmer));
     }
     kmers
 }
 
 pub fn get_kmer_exts<K: Kmer>(path: &str, canon: bool) -> (Vec<K>, Vec<Exts>) {
-    let mut fasta_reader = FastaReader::new(path).unwrap();
+    let fasta_reader = FastaReader::new(path).unwrap();
     let mut kmers = Vec::new();
-    let mut exts = Vec::new();
 
-    while let Some(mut record) = fasta_reader.next() {
+    for record in fasta_reader {
         let kmer_iter = record.iter_kmer_exts::<K>(canon);
-        for (kmer, _flip, ext) in kmer_iter {
-            exts.push(ext);
-            kmers.push(kmer);
-        }
+        kmers.extend(kmer_iter.map(|(kmer, _flip, exts)| (kmer, exts)));
     }
-    (kmers, exts)
+    kmers.into_iter().unzip()
 }
 
 #[cfg(test)]
@@ -286,32 +282,34 @@ mod unit_test {
 
     use debruijn::kmer::Kmer3;
 
-    static PATH : &str = "test.fna";
+    static PATH : &str = "../data/input/test.fna";
 
     // TODO: proper unit tests
 
     #[test]
     fn test_fasta_reader() {
-        let mut fasta_reader = FastaReader::new(PATH).unwrap();
-        while let Some(record) = fasta_reader.next() {
+        let fasta_reader = FastaReader::new(PATH).unwrap();
+        for record in fasta_reader {
             println!("Header: {}", record.header);
+            println!("Sequence: {}", String::from_utf8_lossy(&record.sequence));
         }
     }
 
     #[test]
-    fn test_iter_nucleo() {
-        let mut fasta_reader = FastaReader::new(PATH).unwrap();
-        while let Some(mut record) = fasta_reader.next() {
-            let iter = record.iter_nucleotides();
-            let seq = String::from_utf8( iter.collect()).unwrap();
-            println!("{:?}", seq);
-        }
+    fn test_par_iter_records() {
+        let fasta_reader = FastaReader::new(PATH).unwrap();
+        let par_iter = fasta_reader.par_iter();
+        par_iter.for_each(|record| {
+            println!("Header: {}", record.header);
+            println!("Sequence: {}", String::from_utf8_lossy(&record.sequence));
+        });
+
     }
 
     #[test]
     fn test_iter_kmers() {
-        let mut fasta_reader = FastaReader::new(PATH).unwrap();
-        while let Some(mut record) = fasta_reader.next() {
+        let fasta_reader = FastaReader::new(PATH).unwrap();
+        for record in fasta_reader {
             println!(">{}", record.header);            
             let iter = record.iter_kmers::<Kmer3>(false);
             for kmer in iter {
@@ -322,8 +320,8 @@ mod unit_test {
 
     #[test]
     fn test_iter_kmer_exts() {
-        let mut fasta_reader = FastaReader::new(PATH).unwrap();
-        while let Some(mut record) = fasta_reader.next() {
+        let fasta_reader = FastaReader::new(PATH).unwrap();
+        for record in fasta_reader {
             println!(">{}", record.header);            
             let iter = record.iter_kmer_exts::<Kmer3>(true);
             for kmer in iter {
@@ -347,9 +345,9 @@ mod tests_time {
     #[test]
     fn iter_kmers() {
         let start = Instant::now();
-        let mut reader = FastaReader::new(PATH).unwrap();
         let mut count: usize = 0;
-        while let Some(mut record) = reader.next() {
+        let fasta_reader = FastaReader::new(PATH).unwrap();
+        for record in fasta_reader {
             let iter = record.iter_kmers::<Kmer31>(false);
             for _kmer in iter {
                 count += 1;
@@ -367,7 +365,7 @@ mod tests_time {
         let start = Instant::now();
         let mut reader = FastaReader::new(PATH).unwrap();
         let mut count: usize = 0;
-        while let Some(mut record) = reader.next() {
+        while let Some(record) = reader.next() {
             let iter = record.iter_kmer_exts::<Kmer31>(false);
             for _kmer in iter {
                 count += 1;

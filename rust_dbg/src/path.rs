@@ -1,8 +1,8 @@
-pub use crate::dbg::Graph;
+pub use crate::graph::Graph;
 
 use debruijn::{Kmer, Dir, complement, DnaBytes};
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::error::Error;
 
 /// Search the shortest path between two k-mers in a graph using the Breadth-First Search algorithm.
@@ -13,6 +13,11 @@ pub fn get_shortest_path<K: Kmer>(graph: &Graph<K>, start: K, end: K) -> Result<
 
     let (start_c, start_flip) = if graph.canon {start.min_rc_flip()} else {(start, false)};
     let (end_c, end_flip) = if graph.canon {end.min_rc_flip()} else {(end, false)};
+
+    // edge case: start and end are the same
+    if start_c == end_c && start_flip == end_flip {
+        return Ok(DnaBytes(start.iter().collect()));
+    }
 
     // start kmer
     let start_id = graph.get_key_id_unsafe(&start_c);
@@ -28,7 +33,7 @@ pub fn get_shortest_path<K: Kmer>(graph: &Graph<K>, start: K, end: K) -> Result<
         // println!("   Processing kmer: {:?} at id: {:?}, flip: {:?}", kmer_c, id, flip);
         let dir = if flip { Dir::Left } else { Dir::Right };
         let ext_bases =  graph.get_exts(id).get(dir);
-        'neigh: for &base in ext_bases.iter() {
+        for &base in ext_bases.iter() {
             let neigh = kmer_c.extend(base, dir);
             let (neigh_c, neigh_flip) = if graph.canon {neigh.min_rc_flip()} else {(neigh, false)};
             let neigh_id = graph.get_key_id_unsafe(&neigh_c);
