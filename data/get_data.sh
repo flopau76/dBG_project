@@ -46,3 +46,16 @@ seqkit seq input/chr1/AalbF5.fna -w 0 | \
     perl -pe 's/N+/\n>AalbF5#1#chr1\n/g' | \
     seqkit rename -1 | \
     seqkit seq -m 31  -o AalbF5_splitN.fna
+
+#_______________________________________________________________________________
+# Run GGCAT
+#_______________________________________________________________________________
+seq 1 1 | while read i; do
+    ggcat build -k 31 -s 1 -j 10 input/chr$i/AalbF3.fna input/chr$i/AalbF5.fna -o output/chr${i}/graph_k31.fna
+    ggcat build -k 31 -s 1 -j 10 input/chr$i/AalbF3.fna -o output/chr${i}/AalbF3_k31.fna
+    ggcat build -k 31 -s 1 -j 10 input/chr$i/AalbF5.fna -o output/chr${i}/AalbF5_k31.fna
+done
+
+# args: -k: kmer size
+#       -s: minimal kmer multiplicity for filtering
+#       -j: number of threads
