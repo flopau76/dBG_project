@@ -19,7 +19,7 @@ fn main() {
     let path_graph = "../data/output/chr1/AalbF5_k31.fna";
     let path_bin = "../data/output/chr1/AalbF5_k31.bin";
     let path_haplo = "../data/input/chr1/AalbF5_splitN.fna";
-    let path_bfs = "../data/output/chr1/path.AalbF5_splitN_new_version.fna";
+    let path_bfs = "../data/output/chr1/path.AalbF5_splitN.fna";
 
     // params used for kmer construction by ggcat
     let canon = true;
@@ -135,6 +135,7 @@ fn get_path<K: Kmer>(graph: &Graph<K>, fasta_reader: FastaReader, save_file: &st
         let start = Instant::now();
         let mut kmer_iter = record.iter_kmers::<K>(false);
         let first_kmer = kmer_iter.next().unwrap();
+        
         let last_kmer = kmer_iter.last().unwrap();
         let path = get_shortest_path(graph, first_kmer, last_kmer).unwrap();
         let path_str = path.iter().map(|b| bits_to_ascii(b) as char).collect::<String>();
@@ -143,8 +144,10 @@ fn get_path<K: Kmer>(graph: &Graph<K>, fasta_reader: FastaReader, save_file: &st
         writeln!(file, "{}", path_str).unwrap();
         println!("  - path length: {}\n  - time elapsed: {:?}", path.len(), duration);
         file.flush().unwrap();
-        if count == 10 {
-            break;
-        }
+        // if count == 10 {
+        //     break;
+
+
+        // }
     }
 }
