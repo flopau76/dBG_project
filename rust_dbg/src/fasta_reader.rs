@@ -1,3 +1,5 @@
+//! To parse fasta files and extract kmers and their extensions.
+
 use std::io::{BufReader, BufRead, Result, Seek, SeekFrom};
 use std::fs::File;
 use std::path::Path;
@@ -9,7 +11,7 @@ use rayon::prelude::*;
 use std::sync::Arc;
 use std::cell::RefCell;
 
-/// Fasta reader
+/// Buffered reader for fasta files.
 pub struct FastaReader {
     buffer: BufReader<File>,
     index: Vec<usize>,
@@ -17,6 +19,7 @@ pub struct FastaReader {
 }
 
 impl FastaReader {
+    /// Creates a new FastaReader from the path to a fasta file.  
     pub fn new(path: impl AsRef<Path>) -> Result<Self> {
         let path = Arc::from(path.as_ref());
 
@@ -26,21 +29,21 @@ impl FastaReader {
         // Iterate once over the file to make the index
         let mut index = Vec::new();
         let mut pos: usize = 0;
-        let mut nb_bytes = buffer.skip_until(b'>').unwrap();
+        let mut nb_bytes = buffer.skip_until(b'>')?;
         while nb_bytes > 0 {
             pos += nb_bytes;
             index.push(pos);
-            nb_bytes = buffer.read_until(b'>', &mut Vec::new()).unwrap();
+            nb_bytes = buffer.read_until(b'>', &mut Vec::new())?;
         }
 
         // Rewind the buffer to the beginning
-        buffer.seek(SeekFrom::Start(0)).unwrap();
+        buffer.seek(SeekFrom::Start(0))?;
 
         Ok(Self{buffer, index, path})
     }
     
-    /// Reads the next fasta record from the file
-    pub fn next(&mut self) -> Option<FastaRecord> {
+    /// Reads the next record in the file.
+    fn next(&mut self) -> Option<DnaRecord> {
         // Skip until the next header
         match self.buffer.skip_until(b'>') {
             Ok(0) => return None, // EOF
@@ -66,24 +69,14 @@ impl FastaReader {
         // Reposition the buffer at the start of the next seq header
         self.buffer.seek_relative(-1).unwrap();
 
-        Some(FastaRecord {
+        Some(DnaRecord {
             header,
             sequence,
         })
     }
-}
 
-impl Iterator for FastaReader {
-    type Item = FastaRecord;
-    
-    fn next(&mut self) -> Option<Self::Item> {
-        self.next()
-    }
-}
-
-/// Parallel iterator for FastaReader
-impl FastaReader {
-       pub fn par_iter(self) -> impl ParallelIterator<Item = FastaRecord> {
+    /// Transforms the reader into a parallel iterator.
+    pub fn into_par_iter(self) -> impl ParallelIterator<Item = DnaRecord> {
         let path = self.path;
         let index = self.index[0..(self.index.len()-1)].to_vec();
 
@@ -112,42 +105,67 @@ impl FastaReader {
                 }
                 sequence.retain(|&c| c != b'\n');
                                 
-                FastaRecord { header, sequence }
+                DnaRecord { header, sequence }
             }
         )
     }
 }
 
-/// Sequence record associated with a FastaReader
-pub struct FastaRecord {
+impl Iterator for FastaReader {
+    type Item = DnaRecord;
+    
+    fn next(&mut self) -> Option<Self::Item> {
+        self.next()
+    }
+}
+
+// This is unstable code: for now, `Item`` must be well defined, ad not just a trait object
+// impl IntoParallelIterator for FastaReader {
+//     type Item = DnaRecord;
+//     type Iter = impl ParallelIterator<Item = DnaRecord>;
+
+//     fn into_par_iter(self) -> Self::Iter {
+//         self.into_par_iter()
+//     }
+// }
+
+/// DNA record composed of a header and the corresponding sequence.
+pub struct DnaRecord {
     header: String,
     sequence: Vec<u8>,
 }
 
-impl FastaRecord {
-    pub fn iter_nucleotides(&self) -> Iter<'_, u8> {
-        self.sequence.iter()
-    }
-
-    pub fn iter_kmers<K: Kmer>(&self, canonical: bool) -> impl Iterator<Item = (K, bool)> {
-        KmerIterator::new(self, canonical)
-    }
-
-    pub fn iter_kmer_exts<K: Kmer>(&self, canonical: bool) -> impl Iterator<Item = (K, bool, Exts)> {
-        KmerExtsIterator::new(self, canonical)
-    }
-
+impl DnaRecord {
+    /// Returns the header of the record.
     pub fn header(&self) -> &str {
         &self.header
     }
-
+    /// Returns the sequence of the record (in ascii encoding).
     pub fn sequence(&mut self) -> &Vec<u8> {
         &self.sequence
     }
+    /// Creates an iterator over the nucleotides of the sequence.
+    pub fn iter_nucleotides(&self) -> Iter<'_, u8> {
+        self.sequence.iter()
+    }
+    /// Creates an iterator over the kmers of the sequence.
+    pub fn iter_kmers<K: Kmer>(&self, canonical: bool) -> impl Iterator<Item =K> {
+        KmerIterator::new(self, canonical).map(|(kmer, _flip)| kmer)
+    }
+    /// Creates an iterator over `(K, bool)` tuples of the sequence.  
+    /// The bool indicates if the returned kmer is in the reverse complement orientation compared to the original sequence.
+    pub fn iter_kmers_flip<K: Kmer>(&self, canonical: bool) -> impl Iterator<Item = (K, bool)> {
+        KmerIterator::new(self, canonical)
+    }
+
+    /**  Creates an iterator over the `(K, bool, Exts)` tuples of the sequence, with the extension of each kmer to its previous and following base.  
+    Note: If the sequence contains non-ACGT characters, invalid bases are skipped, which creates extensions accross non truly adjacent kmers.*/
+    pub fn iter_kmer_exts<K: Kmer>(&self, canonical: bool) -> impl Iterator<Item = (K, bool, Exts)> {
+        KmerExtsIterator::new(self, canonical)
+    }
 }
 
-/// Iterator over the kmers of a sequence
-/// Skips all invalid kmers (containing non-ACGT characters)
+/// Iterator over the kmers of a sequence.
 pub struct KmerIterator<'a, K: Kmer> {
     nucleo_iter: Iter<'a, u8>,
     cur_kmer: K,
@@ -156,7 +174,7 @@ pub struct KmerIterator<'a, K: Kmer> {
 }
 
 impl<'a, K: Kmer> KmerIterator<'a, K> {
-    fn new(record: &'a FastaRecord, canonical: bool) -> Self {
+    fn new(record: &'a DnaRecord, canonical: bool) -> Self {
         Self {
             nucleo_iter: record.iter_nucleotides(),
             cur_kmer: K::empty(),
@@ -167,8 +185,10 @@ impl<'a, K: Kmer> KmerIterator<'a, K> {
 }
 
 impl<K: Kmer> Iterator for KmerIterator<'_, K> {
+    /// A tuple `(kmer, flip)` where the boolean `flip` indicates if the kmer is in the reverse complement orientation compared to the original sequence.
     type Item = (K, bool);
 
+    /// Advances the iterator to the next valid kmer, skipping all ones containing invalid bases.
     fn next(&mut self) -> Option<Self::Item> {
         // elongate the current kmer until it reaches k
         while self.cur_count < K::k() {
@@ -204,8 +224,7 @@ impl<K: Kmer> Iterator for KmerIterator<'_, K> {
     }
 }
 
-/// Iterator over the kmers and their extremities of a sequence
-/// Note: Will not work properly if the sequence contains non-ACGT characters
+/// Iterator over the kmers of a sequence, and their extensions to the previous and following bases.
 pub struct KmerExtsIterator<'a, K: Kmer> {
     kmer_iter: KmerIterator<'a, K>,
     left_ext: Exts,
@@ -213,7 +232,7 @@ pub struct KmerExtsIterator<'a, K: Kmer> {
 }
 
 impl<'a, K: Kmer> KmerExtsIterator<'a, K> {
-    fn new(record: &'a FastaRecord, canonical: bool) -> Self {
+    fn new(record: &'a DnaRecord, canonical: bool) -> Self {
         let mut kmer_iter = KmerIterator::new(record, canonical);
         let left_ext = Exts::empty();
         let current_kmer = kmer_iter.next();
@@ -228,6 +247,7 @@ impl<'a, K: Kmer> KmerExtsIterator<'a, K> {
 impl<K: Kmer> Iterator for KmerExtsIterator<'_, K> {
     type Item = (K, bool, Exts);
 
+    /// Advances the iterator to the next valid kmer, skipping all ones containing invalid bases.
     fn next(&mut self) -> Option<Self::Item> {
         let (current_kmer, current_flip) = self.current_kmer?;
 
@@ -260,7 +280,7 @@ pub fn get_kmers<K: Kmer>(path: &str, canon: bool) -> Vec<K> {
 
     for record in fasta_reader {
         let kmer_iter = record.iter_kmers::<K>(canon);
-        kmers.extend(kmer_iter.map(|(kmer, _flip)| kmer));
+        kmers.extend(kmer_iter);
     }
     kmers
 }
@@ -298,8 +318,7 @@ mod unit_test {
     #[test]
     fn test_par_iter_records() {
         let fasta_reader = FastaReader::new(PATH).unwrap();
-        let par_iter = fasta_reader.par_iter();
-        par_iter.for_each(|record| {
+        fasta_reader.into_par_iter().for_each(|record| {
             println!("Header: {}", record.header);
             println!("Sequence: {}", String::from_utf8_lossy(&record.sequence));
         });
