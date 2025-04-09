@@ -136,6 +136,10 @@ pub struct DnaRecord {
 }
 
 impl DnaRecord {
+    /// Creates a new DnaRecord from a header and a sequence.
+    pub fn new(header: String, sequence: Vec<u8>) -> Self {
+        Self { header, sequence }
+    }
     /// Returns the header of the record.
     pub fn header(&self) -> &str {
         &self.header

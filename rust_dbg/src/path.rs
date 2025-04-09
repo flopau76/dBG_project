@@ -1,9 +1,10 @@
 //! Path finding algorithms for de Bruijn graphs
 use crate::graph::Graph;
+use crate::fasta_reader::DnaRecord;
 
-use debruijn::{Kmer, Dir, DnaBytes};
+use debruijn::{Dir, DnaBytes, Kmer};
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::collections::hash_map::Entry::Vacant;
 use std::error::Error;
 
@@ -60,6 +61,56 @@ pub fn get_shortest_path<K: Kmer>(graph: &Graph<K>, start: K, end: K) -> Result<
     Ok(DnaBytes(seq))
 }
 
+/// Breaks the input haplotype into segments corresponding to shortest paths in the graph.
+pub fn get_checkpoints<K: Kmer>(graph: &Graph<K>, haplo: &DnaRecord) -> Vec<(K, K)> {
+    let mut chunks = Vec::new();
+    let mut kmer_iter = haplo.iter_kmers::<K>(false);
+
+    let mut start = kmer_iter.next();
+    let mut nb_chunk = 0;
+
+    // while not at the end of the haplotype: start a new BFS
+    while start.is_some() {
+        nb_chunk += 1;
+        let mut size_chunk = 0;
+
+        let start_kmer = start.unwrap();
+        let mut FS = Vec::new();        // frontier set
+        let mut NS = vec![start_kmer];  // next set
+        let mut visited = HashSet::new();
+
+        let mut current_kmer = start_kmer;
+        let mut next_kmer = kmer_iter.next();
+
+        // while BFS coincides with the haplotype: explore next level of BFS
+        while next_kmer.is_some() && !visited.contains(&next_kmer.unwrap()) {
+            size_chunk += 1;
+
+            FS = NS;
+            NS = Vec::new();
+            current_kmer = next_kmer.unwrap();
+            next_kmer = kmer_iter.next();
+
+            // while there are kmers in the frontier set: explore their neighbors
+            while let Some(kmer) = FS.pop() {
+                let exts = graph.get_exts(&kmer).expect("kmer was added to set so must be present");
+                for &base in exts.get(Dir::Right).iter() {
+                    let neigh = kmer.extend_right(base);
+                    let new = visited.insert(neigh);
+                    if new {
+                        NS.push(neigh);
+                    }
+                }
+            }
+        }
+
+        println!("Found chunk {} after {} steps", nb_chunk, size_chunk);
+        chunks.push((start_kmer, current_kmer));
+        start = next_kmer;
+    }
+    chunks
+}
+
 #[cfg(test)]
 mod unit_test {
     use super::*;
@@ -98,4 +149,13 @@ mod unit_test {
         }
     }
 
+    #[test]
+    fn test_get_checkpoints() {
+        let record = DnaRecord::new(String::from("test"), SEQ.to_vec());
+        for &canon in [false, true].iter() {
+            let graph = make_graph(canon);
+            let path = get_checkpoints(&graph, &record);
+            println!("Path: {:?}", path);
+        }
+    }
 }
