@@ -130,6 +130,14 @@ __________________
 - court terme: git fonctionnel avec readme explicatif
 - moyen terme: decoupage haplotype en "plus court chemin par morceaux"
 
+### 08/04 au ...
+- documentation Readme + code
+- algo decoupage haplotype. C'est trop long, 2 choses prennent du temps: trouver les voisins dans le dbg + vérifier s'ils ont déja été visités dans la HashMap
+- améliorations possible:
+    - changer la méthode de hashage: test d'autres fonctions de hashage: ça change pas grand chose
+    - ne pas enregistrer les kmers mais juste les unitigs dans le graph -> nécessite de revoir la structure + tjrs possible de vérifier efficacement si un kmer existe ?
+        - utilisation de ggcat-api ?
+
 ## Comparaison crates rust
 #### Ragnar Groot: packed-seq, ptr-hash, simd-minimizers
 +crates très optimisées  

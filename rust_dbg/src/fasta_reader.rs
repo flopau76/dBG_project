@@ -145,7 +145,7 @@ impl DnaRecord {
         &self.header
     }
     /// Returns the sequence of the record (in ascii encoding).
-    pub fn sequence(&mut self) -> &Vec<u8> {
+    pub fn sequence(&self) -> &Vec<u8> {
         &self.sequence
     }
     /// Creates an iterator over the nucleotides of the sequence.

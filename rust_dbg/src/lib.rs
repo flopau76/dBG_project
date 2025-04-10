@@ -5,3 +5,6 @@ This crates provides methods for the construction and the manipulation of de Bru
 pub mod fasta_reader;
 pub mod graph;
 pub mod path;
+
+pub mod graph_old;
+pub mod path_old;
