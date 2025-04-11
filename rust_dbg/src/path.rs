@@ -9,8 +9,24 @@ use std::collections::VecDeque;
 use std::collections::hash_map::Entry::Vacant;
 use std::error::Error;
 
+/// Custom error type for pathway search operations
+#[derive(Debug)]
+pub enum PathwayError<K: Kmer> {
+    KmerNotFound(K),
+    NoPathExists,
+}
+impl<K: Kmer> Error for PathwayError<K> {}
+impl<K: Kmer> std::fmt::Display for PathwayError<K> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PathwayError::KmerNotFound(kmer) => write!(f, "Kmer not found: {:?}", kmer),
+            PathwayError::NoPathExists => write!(f, "No path found between the given k-mers"),
+        }
+    }
+}
+
 /// Search the shortest path between two k-mers in a graph using the Breadth-First Search algorithm.
-pub fn get_shortest_path<K: Kmer>(graph: &DebruijnGraph<K,()>, start: K, end: K) -> Result<DnaString, Box<dyn Error>> {
+pub fn get_shortest_path<K: Kmer>(graph: &DebruijnGraph<K,()>, start: K, end: K) -> Result<DnaString, PathwayError<K>> {
     let mut parents= AHashMap::default();
     let mut queue = VecDeque::new();
 
@@ -20,42 +36,44 @@ pub fn get_shortest_path<K: Kmer>(graph: &DebruijnGraph<K,()>, start: K, end: K)
         return Ok(DnaString::from_bytes(&seq));
     }
 
-    let (start_id, _side, start_flip) = graph.find_link(start, Dir::Right).expect("start kmer does not correspond to the beginning of a unitig");
-    let (end_id, _side, end_flip) = graph.find_link(end, Dir::Left).expect("end kmer does not correspond to the ending of a unitig");
+    let (start_id, start_dir, _flip) = graph.find_link(start, Dir::Right)
+        .ok_or(PathwayError::KmerNotFound(start))?;
+    let (end_id, end_dir, _flip) = graph.find_link(end, Dir::Left)
+        .ok_or(PathwayError::KmerNotFound(end))?;
+    let end_dir = end_dir.flip();
 
     // mark the start kmer as visited and add it to the queue
-    parents.insert((start_id, start_flip), (start_id, start_flip));
-    queue.push_back((start_id, start_flip));
+    parents.insert((start_id, start_dir), (start_id, start_dir));
+    queue.push_back((start_id, start_dir));
 
     // perform BFS
-    'kmer: while let Some((node_id, flip)) = queue.pop_front() {
-        let edges = graph.get_node(node_id).edges(Dir::Right.cond_flip(flip));
-        for (neigh_id, _dir, neigh_flip) in edges {
-            let entry = parents.entry((neigh_id, neigh_flip));
+    'kmer: while let Some((node_id, dir)) = queue.pop_front() {
+        let edges = graph.get_node(node_id).edges(dir.flip());
+        for (neigh_id, neigh_dir, _flip) in edges {
+            let entry = parents.entry((neigh_id, neigh_dir));
             if let Vacant(e) = entry {
-                e.insert((node_id, flip));
-                queue.push_back((neigh_id, neigh_flip));
+                e.insert((node_id, dir));
+                queue.push_back((neigh_id, neigh_dir));
             }
-            if (neigh_id, neigh_flip) == (end_id, end_flip) {
+            if (neigh_id, neigh_dir) == (end_id, end_dir) {
                 break 'kmer;
             }
         }
     }
 
     if queue.is_empty() {
-        return Err("No path found".into());
+        return Err(PathwayError::NoPathExists);
     }
 
     let mut path = Vec::new();
-    let (mut kmer_id, mut flip) = (end_id, end_flip);
+    let mut node = (end_id, end_dir);
 
-    while (kmer_id, flip) != (start_id, start_flip) {
-        path.push((kmer_id, Dir::Left.cond_flip(flip)));
-        (kmer_id, flip) = *parents.get(&(kmer_id, flip)).expect("parent should be in graph");
+    while node != (start_id, start_dir) {
+        path.push(node);
+        node = *parents.get(&node).unwrap();
     }
-    path.push((kmer_id, Dir::Right.cond_flip(flip)));
+    path.push(node);
     path.reverse();
-
 
     Ok(graph.sequence_of_path(path.iter()))
 }
@@ -84,8 +102,12 @@ mod unit_test {
     fn test_shortest_path() {
         let seq = make_seq();
         let (start, end) = seq.both_term_kmer::<Kmer3>();
-        let graph = graph::graph_from_unitigs(PATH, false);
+        let graph = graph::graph_from_unitigs_serial(PATH, false);
+        println!("{:?}", graph.base.sequences);
         graph.print();
+        println!();
+        println!("Start: {:?}", start);
+        println!("End: {:?}", end);
         let path = get_shortest_path(&graph, start, end).unwrap();
         println!("Shortest path: {:?}", path);
     }

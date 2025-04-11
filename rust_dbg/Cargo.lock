@@ -58,9 +58,9 @@ checksum = "349f9b6a179ed607305526ca489b34ad0a41aed5f7980fa90eb03160b69598fb"
 
 [[package]]
 name = "boomphf"
-version = "0.5.9"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4e8fb7f38fef59c32549861151d63a6190865e60cf690340c13e3d7178b42a2f"
+checksum = "617e2d952880a00583ddb9237ac3965732e8df6a92a8e7bcc054100ec467ec3b"
 dependencies = [
  "crossbeam-utils",
  "log",
@@ -103,8 +103,7 @@ checksum = "d0a5c400df2834b80a4c3327b3aad3a4c4cd4de0629063962b03235697506a28"
 [[package]]
 name = "debruijn"
 version = "0.3.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "346d29ff45270b3642817082a513e55765ef5686b68e6cc0ed595897a64439d5"
+source = "git+https://github.com/flopau76/rust-debruijn.git?branch=patch-1#6825e7528e47ca286dd6596cdb271939ec80c6a1"
 dependencies = [
  "bit-set",
  "boomphf",

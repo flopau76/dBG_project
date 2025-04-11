@@ -19,7 +19,6 @@ fn main() {
     let path_bin = "../data/output/chr1/AalbF5_k31.bin";
     let path_haplo = "../data/input/chr1/AalbF5_splitN.fna";
     let path_bfs = "../data/output/chr1/path.AalbF5_splitN.fna";
-    let path_chunks = "../data/output/chr1/checkpoints.AalbF5_splitN.fna";
 
     // params used for kmer construction by ggcat
     let stranded = false;
@@ -143,12 +142,12 @@ fn get_shortest_path<K: Kmer>(graph: &DebruijnGraph<K,()>, fasta_reader: FastaRe
         let seq = record.sequence();
         let seq = DnaString::from_acgt_bytes(seq);
         let (first_kmer, last_kmer) = seq.both_term_kmer();
-        println!("  - first kmer: {:?}\tlast kmer: {:?}", first_kmer, last_kmer);
         println!("Processing record: {}", record.header());
+        println!("  - first kmer: {:?}\tlast kmer: {:?}", first_kmer, last_kmer);
         let start = Instant::now();
         let path = path::get_shortest_path(graph, first_kmer, last_kmer);
         if path.is_err() {
-            println!("  - no path found");
+            println!("  - Error finding path: {:?}", path.err().unwrap());
             continue;
         }
         let path = path.unwrap();
@@ -157,9 +156,6 @@ fn get_shortest_path<K: Kmer>(graph: &DebruijnGraph<K,()>, fasta_reader: FastaRe
         writeln!(file, "{:?}", path).unwrap();
         println!("  - path length: {}\n  - time elapsed: {:?}", path.len(), duration);
         file.flush().unwrap();
-        // if count == 10 {
-        //     break;
-        // }
     }
 }
 
