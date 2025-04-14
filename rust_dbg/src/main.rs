@@ -1,7 +1,7 @@
 use rust_dbg::{fasta_reader::FastaReader, graph, path};
 
 
-use debruijn::{kmer, Kmer, Vmer};
+use debruijn::{kmer, Kmer, Vmer, Dir};
 use debruijn::graph::DebruijnGraph;
 use debruijn::dna_string::DnaString;
 
@@ -74,62 +74,76 @@ fn load_graph<K: Kmer + for<'a> Deserialize<'a>>(path_bin: &str) -> DebruijnGrap
     graph
 }
 
-// /// Print some stats about the graph
-// fn stats_graph<K: Kmer>(graph: &DebruijnGraph<K,()>) {
-//     print!("Iterating graph... ");
-//     std::io::stdout().flush().unwrap();
-//     let start = Instant::now();
-//     let nb_nodes = graph.len();
-//     let mut nb_edges: usize = 0;
-//     let mut degree_histo = vec![0; 9];
-//     for (_kmer, exts) in graph.into_iter() {
-//         let degree = (exts.num_exts_l() + exts.num_exts_r()) as usize;
-//         nb_edges += degree;
-//         degree_histo[degree] += 1;
-//     }
-//     nb_edges /= 2;
-//     let duration = start.elapsed();
-//     println!("done in {:?}", duration);
-//     println!("Graph contains:\n  - {} nodes\n  - {} edges\n  degree histogramm: {:?}", nb_nodes, nb_edges, degree_histo);
-// }
+/// Print some stats about the graph
+fn stats_graph<K: Kmer>(graph: &DebruijnGraph<K,()>) {
+    print!("Iterating graph... ");
+    std::io::stdout().flush().unwrap();
+    let start = Instant::now();
+    let nb_nodes = graph.len();
+    let mut nb_edges: usize = 0;
+    let mut degree_histo = vec![0; 9];
+    for exts in graph.base.exts.iter() {
+        let degree = (exts.num_exts_l() + exts.num_exts_r()) as usize;
+        nb_edges += degree;
+        degree_histo[degree] += 1;
+    };
+    nb_edges /= 2;
+    let duration = start.elapsed();
+    println!("done in {:?}", duration);
+    println!("Graph contains:\n  - {} nodes\n  - {} edges\n  degree histogramm: {:?}", nb_nodes, nb_edges, degree_histo);
+}
 
-// /// Count the number of breakpoints in a graph, for a given haplotype
-// fn stats_haplo<K: Kmer>(graph: &Graph<K>, haplo: FastaReader) {
-//     print!("Iterating haplo... ");
-//     std::io::stdout().flush().unwrap();
-//     let start = Instant::now();
-//     let mut count: usize = 0;
-//     let mut junctions: usize = 0;
-//     let mut dead_ends: usize = 0;
+/// Count the number of breakpoints in a graph, for a given haplotype
+fn stats_haplo<K: Kmer>(graph: &DebruijnGraph<K,()>, haplo: FastaReader) {
+    print!("Iterating haplo... ");
+    std::io::stdout().flush().unwrap();
+    let start = Instant::now();
 
-//     let mut prev_base = 0;
-//     for record in haplo {
-//         for kmer in record.iter_kmers(false) {
-//             count += 1;
-//             let exts = graph.get_exts(&kmer);
-//             if exts.is_none() {
-//                 println!("Kmer {} not found in graph\n", count);
-//                 continue;
-//             }
-//             // get the next possible kmers
-//             let exts = exts.unwrap();
-//             match exts.num_exts_r() {
-//                 0 => { dead_ends += 1; },
-//                 1 => { },
-//                 _ => { junctions += 1; },
-//             }
+    let mut kmer_count: usize = 0;
 
-//             // check that there is an edge the previous kmer
-//             if !exts.has_ext(Dir::Left, prev_base) && (count > 1) {
-//                 println!("Kmer {} has no edge to previous the kmer", count);
-//             }
-//             prev_base = kmer.get(0);
-//         }
-//     }
-//     let duration = start.elapsed();
-//     println!("done in {:?}", duration);
-//     println!("Haplo contains:\n  - kmers: {}\n  - breakpoints: {}  (>1)\t\t{}  (<1)", count, junctions, dead_ends);
-// }
+    let mut junctions: usize = 0;
+    let mut dead_ends: usize = 0;
+
+    for record in haplo {
+        let mut kmer_iter = record.iter_kmers(false);
+        let mut current_kmer = kmer_iter.next();
+        while let Some(kmer) = current_kmer {
+            // check that the kmer is in the graph at the beginning of a unitig
+            let lookup = graph.find_link(kmer, Dir::Right);
+            if lookup.is_none() {
+                println!("Kmer {} not found at the beginning of a unitig\n", kmer_count);
+                continue;
+            }
+            let (node_id, dir, _) = lookup.unwrap();
+            let node = graph.get_node(node_id);
+            let node_length = node.len();
+            kmer_count += node_length;
+
+            // go to the end of the current unitig
+            // TODO: check that the unitig matches the input haplotype
+            if node_length >= K::k() +1 {
+                current_kmer = kmer_iter.nth(node_length-K::k()-1);
+                if current_kmer.is_none() {
+                    println!("More kmers in the unitig than expected");
+                    continue;
+                }
+            }
+            // go to the start of the next unitig, if any
+            current_kmer = kmer_iter.next();
+
+            // get the edges of the current unitig
+            // TODO: if current kmer is none, we expect to find a dead end, as we are at the end of the sequence
+            match node.exts().num_ext_dir(dir.flip()) {
+                0 => { dead_ends += 1; },
+                1 => { },
+                _ => { junctions += 1; },
+            }
+        }
+    }
+    let duration = start.elapsed();
+    println!("done in {:?}", duration);
+    println!("Haplo contains:\n  - kmers: {}\n  - breakpoints: {}  (>1)\t\t{}  (<1)", kmer_count, junctions, dead_ends);
+}
 
 /// Get the shortest path between first and last kmer for all sequences
 fn get_shortest_path<K: Kmer>(graph: &DebruijnGraph<K,()>, fasta_reader: FastaReader, save_file: &str) {
@@ -145,7 +159,7 @@ fn get_shortest_path<K: Kmer>(graph: &DebruijnGraph<K,()>, fasta_reader: FastaRe
         println!("Processing record: {}", record.header());
         println!("  - first kmer: {:?}\tlast kmer: {:?}", first_kmer, last_kmer);
         let start = Instant::now();
-        let path = path::get_shortest_path(graph, first_kmer, last_kmer);
+        let path = path::get_shortest_path_nodes(graph, first_kmer, last_kmer);
         if path.is_err() {
             println!("  - Error finding path: {:?}", path.err().unwrap());
             continue;

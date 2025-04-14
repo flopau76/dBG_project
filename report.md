@@ -133,10 +133,14 @@ __________________
 ### 08/04 au ...
 - documentation Readme + code
 - algo decoupage haplotype. C'est trop long, 2 choses prennent du temps: trouver les voisins dans le dbg + vérifier s'ils ont déja été visités dans la HashMap
-- améliorations possible:
-    - changer la méthode de hashage: test d'autres fonctions de hashage: ça change pas grand chose
-    - ne pas enregistrer les kmers mais juste les unitigs dans le graph -> nécessite de revoir la structure + tjrs possible de vérifier efficacement si un kmer existe ?
-        - utilisation de ggcat-api ?
+- test d'autres fonctions de hashage: ça change pas grand chose
+- ne pas enregistrer les kmers mais juste les unitigs dans le graph -> nécessite de revoir la structure -> en cours, en utilisant la structure DeBruijnGraph du crate debruijn
+    - modif de la structure graphe, et des algos en consequence
+
+PB: si noeuds = unitigs, le plus court chemin (en nb de nucleotides) n'est pas forcement celui avec le moins de noeuds
+-> on ne peut pas s'arrêter dès qu'on rencontre la cible, il faut continuer d'explorer pour s'assurer que c'est vraiment le plus court chemin. Mais ce n'est pas nécessaire de tout parcourir, on peut s'arrêter des que tous les noeuds du FS sont à distance plus elevée que le meilleur chemin déjà trouvé.
+
+Est-ce que ça a vraiment un intêret d'utiliser des fonctions de distances + sophistiquée ? La distance en nb de nucléotides est probablement plus robuste que celle en nb de noeuds (/unitigs). Mais elle n'est pas constante non plus -> ajouter un haplotype au graphe demande de reverifier l'encodage de tous les chemins existants.
 
 ## Comparaison crates rust
 #### Ragnar Groot: packed-seq, ptr-hash, simd-minimizers
@@ -147,7 +151,6 @@ __________________
 #### debruijn
 +du consortium 10X genomics; beaucoup d'utilisateurs  
 +pas mal de fonctionnalités rassemblés en un seul lieu
--pas possible d'itérer directement sur les kmer canoniques
 
 #### rust-bio
 +very well documented and widely used  
