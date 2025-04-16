@@ -103,7 +103,7 @@ checksum = "d0a5c400df2834b80a4c3327b3aad3a4c4cd4de0629063962b03235697506a28"
 [[package]]
 name = "debruijn"
 version = "0.3.4"
-source = "git+https://github.com/flopau76/rust-debruijn.git?branch=patch-1#6825e7528e47ca286dd6596cdb271939ec80c6a1"
+source = "git+https://github.com/flopau76/rust-debruijn.git?branch=patch-flo#e651cf97fee3ba5edf439246e473d369eb127a48"
 dependencies = [
  "bit-set",
  "boomphf",

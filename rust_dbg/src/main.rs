@@ -1,12 +1,12 @@
 use rust_dbg::{fasta_reader::FastaReader, graph, path};
 
 
-use debruijn::{kmer, Kmer, Vmer, Dir};
+use debruijn::{kmer, Kmer, Dir};
 use debruijn::graph::DebruijnGraph;
 use debruijn::dna_string::DnaString;
 
 use std::fs::File;
-use std::io::{BufWriter, BufReader, Write};
+use std::io::{BufWriter, BufReader, BufRead, Write};
 
 use serde::{Serialize, Deserialize};
 use bincode::serde::{encode_into_std_write, decode_from_std_read};
@@ -17,48 +17,51 @@ fn main() {
     // input/output files
     let path_graph = "../data/output/chr1/AalbF5_k31.fna";
     let path_bin = "../data/output/chr1/AalbF5_k31.bin";
-    let path_haplo = "../data/input/chr1/AalbF5_splitN.fna";
-    let path_bfs = "../data/output/chr1/path.AalbF5_splitN.fna";
+    let path_fasta = "../data/input/chr1/AalbF5.fna";
+    let path_chunks = "../data/output/chr1/chunks_nodes.AalbF5.fna";
+    let path_reconstruct = "../data/output/chr1/reconstruct_nodes.AalbF5.fna";
 
     // params used for kmer construction by ggcat
     let stranded = false;
     type Kmer31 = kmer::VarIntKmer<u64, kmer::K31>;
 
-    let fasta_reader = FastaReader::new(path_haplo).unwrap();
-
-    // let graph = make_graph::<Kmer31>(path_graph, stranded);
-    // save_graph(&graph, path_bin);
+    let graph = make_graph::<Kmer31>(path_graph, stranded);
+    save_graph(&graph, path_bin);
     let graph = load_graph::<Kmer31>(path_bin);
 
-    get_shortest_path(&graph, fasta_reader, path_bfs);
-    // get_checkpoints(&graph, fasta_reader, path_chunks);
+    get_checkpoints(&graph, path_fasta, path_chunks);
+    reconstruct_fasta(&graph, path_chunks, path_reconstruct);
 }
 
-/// Create a graph from a unitigs file
-fn make_graph<K: Kmer + Send + Sync>(path: &str, stranded: bool) -> DebruijnGraph<K,()> {
+/// Create a graph from a unitigs file.
+fn make_graph<K: Kmer + Send + Sync>(path_graph: &str, stranded: bool) -> DebruijnGraph<K,()> {
     print!("Creating graph (parallel)... ");
     std::io::stdout().flush().unwrap();
     let start = Instant::now();
-    let graph = graph::graph_from_unitigs(path, stranded);
+
+    let graph = graph::graph_from_unitigs(path_graph, stranded);
+
     let duration = start.elapsed();
     println!("done in {:?}", duration);
 
     graph
 }
 
-/// Save a graph to a binary file
+/// Save a graph to a binary file.
 fn save_graph<K: Kmer + Serialize>(graph: &DebruijnGraph<K,()>, path_bin: &str) {
     print!("Saving graph... ");
     std::io::stdout().flush().unwrap();
     let start = Instant::now();
+
     let mut f = BufWriter::new(File::create(path_bin).unwrap());
     let config = bincode::config::standard();
-    let _nb_bytes = encode_into_std_write(graph, &mut f, config).unwrap();
+    let _ = encode_into_std_write(graph, &mut f, config).unwrap();
+
     let duration = start.elapsed();
     println!("done in {:?}", duration);
 }
 
-/// Load a graph from a binary file
+/// Load a graph from a binary file.
 fn load_graph<K: Kmer + for<'a> Deserialize<'a>>(path_bin: &str) -> DebruijnGraph<K,()> {
     print!("Loading graph... ");
     std::io::stdout().flush().unwrap();
@@ -74,125 +77,84 @@ fn load_graph<K: Kmer + for<'a> Deserialize<'a>>(path_bin: &str) -> DebruijnGrap
     graph
 }
 
-/// Print some stats about the graph
-fn stats_graph<K: Kmer>(graph: &DebruijnGraph<K,()>) {
-    print!("Iterating graph... ");
-    std::io::stdout().flush().unwrap();
-    let start = Instant::now();
-    let nb_nodes = graph.len();
-    let mut nb_edges: usize = 0;
-    let mut degree_histo = vec![0; 9];
-    for exts in graph.base.exts.iter() {
-        let degree = (exts.num_exts_l() + exts.num_exts_r()) as usize;
-        nb_edges += degree;
-        degree_histo[degree] += 1;
-    };
-    nb_edges /= 2;
-    let duration = start.elapsed();
-    println!("done in {:?}", duration);
-    println!("Graph contains:\n  - {} nodes\n  - {} edges\n  degree histogramm: {:?}", nb_nodes, nb_edges, degree_histo);
-}
+/// Decompose the records in a fasta file into a suite a nodes in the graph and save them to a file.
+fn get_checkpoints<K: Kmer>(graph: &DebruijnGraph<K,()>, path_fasta: &str, path_chunks: &str) {
+    println!("Cutting fasta file into chunks... ");
+    let fasta_reader = FastaReader::new(path_fasta).unwrap();
+    let mut file_chunks = BufWriter::new(File::create(path_chunks).unwrap());
 
-/// Count the number of breakpoints in a graph, for a given haplotype
-fn stats_haplo<K: Kmer>(graph: &DebruijnGraph<K,()>, haplo: FastaReader) {
-    print!("Iterating haplo... ");
-    std::io::stdout().flush().unwrap();
-    let start = Instant::now();
-
-    let mut kmer_count: usize = 0;
-
-    let mut junctions: usize = 0;
-    let mut dead_ends: usize = 0;
-
-    for record in haplo {
-        let mut kmer_iter = record.iter_kmers(false);
-        let mut current_kmer = kmer_iter.next();
-        while let Some(kmer) = current_kmer {
-            // check that the kmer is in the graph at the beginning of a unitig
-            let lookup = graph.find_link(kmer, Dir::Right);
-            if lookup.is_none() {
-                println!("Kmer {} not found at the beginning of a unitig\n", kmer_count);
-                continue;
-            }
-            let (node_id, dir, _) = lookup.unwrap();
-            let node = graph.get_node(node_id);
-            let node_length = node.len();
-            kmer_count += node_length;
-
-            // go to the end of the current unitig
-            // TODO: check that the unitig matches the input haplotype
-            if node_length >= K::k() +1 {
-                current_kmer = kmer_iter.nth(node_length-K::k()-1);
-                if current_kmer.is_none() {
-                    println!("More kmers in the unitig than expected");
-                    continue;
-                }
-            }
-            // go to the start of the next unitig, if any
-            current_kmer = kmer_iter.next();
-
-            // get the edges of the current unitig
-            // TODO: if current kmer is none, we expect to find a dead end, as we are at the end of the sequence
-            match node.exts().num_ext_dir(dir.flip()) {
-                0 => { dead_ends += 1; },
-                1 => { },
-                _ => { junctions += 1; },
-            }
-        }
-    }
-    let duration = start.elapsed();
-    println!("done in {:?}", duration);
-    println!("Haplo contains:\n  - kmers: {}\n  - breakpoints: {}  (>1)\t\t{}  (<1)", kmer_count, junctions, dead_ends);
-}
-
-/// Get the shortest path between first and last kmer for all sequences
-fn get_shortest_path<K: Kmer>(graph: &DebruijnGraph<K,()>, fasta_reader: FastaReader, save_file: &str) {
-    println!("Looking for path in graph... ");
-    let mut file = BufWriter::new(File::create(save_file).unwrap());
-    // let mut file = BufWriter::new(File::options().append(true).create(true).open(save_file).unwrap());       // append instead of overwrite
     let mut count: usize = 0;
     for record in fasta_reader.skip(count) {
         count += 1;
-        let seq = record.sequence();
-        let seq = DnaString::from_acgt_bytes(seq);
-        let (first_kmer, last_kmer) = seq.both_term_kmer();
+        // dividing the record into chunks
         println!("Processing record: {}", record.header());
-        println!("  - first kmer: {:?}\tlast kmer: {:?}", first_kmer, last_kmer);
         let start = Instant::now();
-        let path = path::get_shortest_path_nodes(graph, first_kmer, last_kmer);
-        if path.is_err() {
-            println!("  - Error finding path: {:?}", path.err().unwrap());
-            continue;
-        }
-        let path = path.unwrap();
+        let path = path::get_checkpoints_bfs(&graph, &record).unwrap();
         let duration = start.elapsed();
-        writeln!(file, ">{}\tlen: {}\tdone in: {:?}", record.header(), path.len(), duration).unwrap();
-        writeln!(file, "{:?}", path).unwrap();
-        println!("  - path length: {}\n  - time elapsed: {:?}", path.len(), duration);
-        file.flush().unwrap();
+        println!("  - divided record into {} chunks\n  - time elapsed: {:?}", path.len(), duration);
+
+        // saving them to the file
+        writeln!(file_chunks, ">{}\tlen: {}\tdone in: {:?}", record.header(), path.len(), duration).unwrap();
+        for chunk in path {
+            let start_kmer = chunk.0;
+            let end_kmer = chunk.1;
+            writeln!(file_chunks, "{:?}\t\t{:?}", start_kmer, end_kmer).unwrap();
+        }
+        file_chunks.flush().unwrap();
     }
 }
 
-// fn get_checkpoints<K: Kmer>(graph: &Graph<K>, fasta_reader: FastaReader, save_file: &str) {
-//     println!("Cutting haplo into chunks... ");
-//     let mut file = BufWriter::new(File::create(save_file).unwrap());
+/// Reconstruct the records from a fasta file based on their decomposition into chunks.
+fn reconstruct_fasta<K: Kmer>(graph: &DebruijnGraph<K,()>, file_chunks: &str, file_res: &str) {
+    fn parse_node(kmer: &str) -> (usize,Dir) {
+        let parts = kmer.trim_matches(|c| c == '(' || c == ')').split(',').map(str::trim).collect::<Vec<_>>();
+        let id = parts[0].parse::<usize>().unwrap();
+        let dir = match parts[1] {
+            "Left" => Dir::Left,
+            "Right" => Dir::Right,
+            _ => panic!("Invalid direction"),
+        };
+        (id, dir)
+    }
 
-//     let mut count: usize = 0;
-//     for record in fasta_reader.skip(count) {
-//         count += 1;
-//         println!("Processing record: {}", record.header());
-//         let start = Instant::now();
-//         let path = path::get_checkpoints(&graph, &record);
-//         let duration = start.elapsed();
-//         println!("  - divided record into {} chunks\n  - time elapsed: {:?}", path.len(), duration);
+    let file_chunks = BufReader::new(File::open(file_chunks).unwrap());
+    let mut file_res = BufWriter::new(File::create(file_res).unwrap());
+    let mut header = String::new();
+    let mut record = DnaString::new();
+    let mut nb_chunks: usize = 0;
+    for line in file_chunks.lines() {
+        let line = line.unwrap();
+        if line.starts_with('>') {
+            // save the previous record and create a new one
+            if nb_chunks > 0 {
+                writeln!(file_res, ">{}\tnb chunks: {}\tlen: {}\t", header, nb_chunks, record.len()).unwrap();
+                writeln!(file_res, "{}", record.to_string()).unwrap();
+                file_res.flush().unwrap();
+                record = DnaString::new();
+                nb_chunks = 0;
+            }
+            header = line.trim_start_matches('>').split("\t").next().unwrap().to_owned();
+            println!("Processing record: {}", header);
+            continue;
+        }
+        // parse the line to get the start and end nodes
+        let mut parts = line.split("\t\t");
+        let start = parse_node(parts.next().unwrap());
+        let end = parse_node(parts.next().unwrap());
 
-//         // saving to file
-//         writeln!(file, ">{}\tlen: {}\tdone in: {:?}", record.header(), path.len(), duration).unwrap();
-//         for chunk in path {
-//             let start_kmer = chunk.0;
-//             let end_kmer = chunk.1;
-//             writeln!(file, "{:?}\t\t{:?}", start_kmer, end_kmer).unwrap();
-//         }
-//         file.flush().unwrap();
-//     }
-// }
+        // get the path between the start and end nodes
+        nb_chunks += 1;
+        let chunk = path::get_shortest_path_bfs(graph, start, end).unwrap();
+        if nb_chunks == 1 {
+            record = chunk;
+        } else {
+            record.extend(chunk.to_bytes().into_iter().skip(K::k()-1));
+        }
+    }
+    // save the last record
+    if nb_chunks > 0 {
+        writeln!(file_res, ">{}\tnb chunks: {}\tlen: {}\t", header, nb_chunks, record.len()).unwrap();
+        writeln!(file_res, "{}", record.to_string()).unwrap();
+        file_res.flush().unwrap();
+    }
+}

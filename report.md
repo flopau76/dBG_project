@@ -130,7 +130,7 @@ __________________
 - court terme: git fonctionnel avec readme explicatif
 - moyen terme: decoupage haplotype en "plus court chemin par morceaux"
 
-### 08/04 au ...
+### 08/04 au 14/04
 - documentation Readme + code
 - algo decoupage haplotype. C'est trop long, 2 choses prennent du temps: trouver les voisins dans le dbg + vérifier s'ils ont déja été visités dans la HashMap
 - test d'autres fonctions de hashage: ça change pas grand chose
@@ -141,6 +141,14 @@ PB: si noeuds = unitigs, le plus court chemin (en nb de nucleotides) n'est pas f
 -> on ne peut pas s'arrêter dès qu'on rencontre la cible, il faut continuer d'explorer pour s'assurer que c'est vraiment le plus court chemin. Mais ce n'est pas nécessaire de tout parcourir, on peut s'arrêter des que tous les noeuds du FS sont à distance plus elevée que le meilleur chemin déjà trouvé.
 
 Est-ce que ça a vraiment un intêret d'utiliser des fonctions de distances + sophistiquée ? La distance en nb de nucléotides est probablement plus robuste que celle en nb de noeuds (/unitigs). Mais elle n'est pas constante non plus -> ajouter un haplotype au graphe demande de reverifier l'encodage de tous les chemins existants.
+
+__________________
+## Réunion du 15/04
+Pour l'instant, on reste sur du BFS (minimum de noeuds dans le graphe compacté) et pas du Djikistra. Plus tard, possibilité de tester avec d'autre distance, en fonction des réalités biologiques (pénaliser les petits unitigs par exemple).  
+Scale up -> test avec d'autre génomes.
+
+### 15/04 au ...
+
 
 ## Comparaison crates rust
 #### Ragnar Groot: packed-seq, ptr-hash, simd-minimizers
