@@ -25,12 +25,12 @@ fn main() {
     let stranded = false;
     type Kmer31 = kmer::VarIntKmer<u64, kmer::K31>;
 
-    let graph = make_graph::<Kmer31>(path_graph, stranded);
-    save_graph(&graph, path_bin);
+    // let graph = make_graph::<Kmer31>(path_graph, stranded);
+    // save_graph(&graph, path_bin);
     let graph = load_graph::<Kmer31>(path_bin);
 
     get_checkpoints(&graph, path_fasta, path_chunks);
-    reconstruct_fasta(&graph, path_chunks, path_reconstruct);
+    // reconstruct_fasta(&graph, path_chunks, path_reconstruct);
 }
 
 /// Create a graph from a unitigs file.
@@ -79,7 +79,6 @@ fn load_graph<K: Kmer + for<'a> Deserialize<'a>>(path_bin: &str) -> DebruijnGrap
 
 /// Decompose the records in a fasta file into a suite a nodes in the graph and save them to a file.
 fn get_checkpoints<K: Kmer>(graph: &DebruijnGraph<K,()>, path_fasta: &str, path_chunks: &str) {
-    println!("Cutting fasta file into chunks... ");
     let fasta_reader = FastaReader::new(path_fasta).unwrap();
     let mut file_chunks = BufWriter::new(File::create(path_chunks).unwrap());
 

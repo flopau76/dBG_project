@@ -149,6 +149,18 @@ Scale up -> test avec d'autre génomes.
 
 ### 15/04 au ...
 
+# TODO:
+Modifier le format de save chunks:
+- préciser lorsque le premier/dernier unitig n'est pas parcouru en entier 
+- regarder s'il vaut mieux fusionner end_i et start_i+1 (plus logique/symêtrique) / encoder start_i+1 par la base à ajouter à end_i
+
+Regarder les chunks obtenus en detail:
+- chunks particulierements petits
+- chunks répétés ?
+
+Comparer aux solutions existantes: dbg coloré, vg sans perte d'info. Attention: solution state of the art en espace mémoire ou en query time.
+
+Que faire lorsqu'il y  plusieurs chemins de même longueur ? Pour l'instant, un chunk est valide si le bon chemin fait parti des chemins les plus court. Mais lors de la reconstruction, on en prend un au pif, pas forcement le bon.
 
 ## Comparaison crates rust
 #### Ragnar Groot: packed-seq, ptr-hash, simd-minimizers
