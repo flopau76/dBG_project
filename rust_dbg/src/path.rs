@@ -1,8 +1,8 @@
 //! Path finding algorithms for de Bruijn graphs
 use crate::fasta_reader::DnaRecord;
+use crate::{search_kmer, search_kmer_offset, Graph};
 
 use debruijn::{Dir, Kmer, Mer};
-use debruijn::graph::DebruijnGraph;
 use debruijn::dna_string::DnaString;
 
 use ahash::{AHashMap, AHashSet};
@@ -10,39 +10,44 @@ use std::collections::{VecDeque, BinaryHeap};
 use std::collections::hash_map::Entry;
 use std::cmp::Reverse;
 use std::error::Error;
+use std::io::Write;
 
 /// Custom error type for pathway search operations
 #[derive(Debug)]
-pub enum PathwayError<K: Kmer> {
-    FirstKmerNotFound(K),
-    LastKmerNotFound(K),
+pub enum PathwayError<K> {
     NoPathExists,
+    KmerNotFound(K)
 }
 impl<K: Kmer> Error for PathwayError<K> {}
 impl<K: Kmer> std::fmt::Display for PathwayError<K> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            PathwayError::FirstKmerNotFound(kmer) => write!(f, "First Kmer not found in the graph: {:?}", kmer),
-            PathwayError::LastKmerNotFound(kmer) => write!(f, "Last Kmer not found in the graph: {:?}", kmer),
             PathwayError::NoPathExists => write!(f, "No path found between the given k-mers"),
+            PathwayError::KmerNotFound(kmer) => write!(f, "Kmer not found: {:?}", kmer),
         }
     }
 }
+
+//####################################################################################
+//                       Find the shortest path                                     //
+//####################################################################################
 
 /// Search the shortest path (in number of nodes) in a compacted De Bruijn Graph using the Breadth-First Search algorithm.
 /// Arguments:
 /// - `graph`: the de Bruijn graph to search in
 /// - `start_node`: the starting node in the graph as a tuple of (node_id, start position (left -> node read from left to right))
 /// - `end_node`: the ending node in the graph as a tuple of (node_id, start position (left -> node read from left to right))
-pub fn get_shortest_path_bfs<K: Kmer>(graph: &DebruijnGraph<K,()>, start_node: (usize, Dir), end_node: (usize, Dir)) -> Result<DnaString, PathwayError<K>> {
+
+// TODO: Handle cases with several shortest paths
+pub fn get_shortest_path_bfs<K: Kmer>(graph: &Graph<K>, start_node: (usize, Dir), end_node: (usize, Dir)) -> Result<DnaString, PathwayError<K>> {
     let mut parents= AHashMap::default();
     let mut queue = VecDeque::new();
 
     // edge case: start and end are the same
     if start_node == end_node {
-        let seq = graph.get_node(start_node.0).sequence();
+        let mut seq = graph.get_node(start_node.0).sequence();
         if start_node.1 == Dir::Left {
-            seq.rc();
+            seq = seq.rc();
         }
         return Ok(seq.to_owned());
     }
@@ -71,6 +76,7 @@ pub fn get_shortest_path_bfs<K: Kmer>(graph: &DebruijnGraph<K,()>, start_node: (
         return Err(PathwayError::NoPathExists);
     }
 
+    // reconstruct the path by backtracking the visited nodes
     let mut path = Vec::new();
     let mut node = end_node;
 
@@ -86,7 +92,9 @@ pub fn get_shortest_path_bfs<K: Kmer>(graph: &DebruijnGraph<K,()>, start_node: (
 
 /// Search the shortest path in a compacted De Bruijn Graph. Contrarily to [get_shortest_path_bfs], this algorithm works with a custom distance function `f_dist(x)`,
 /// which indicates how much a path is elongated when adding a node of length `x`.
-pub fn get_shortest_path_djk<K: Kmer, D>(graph: &DebruijnGraph<K,()>, start_node: (usize, Dir), end_node: (usize, Dir), f_dist: D) -> Result<DnaString, PathwayError<K>>
+
+// TODO: Handle cases with several shortest paths
+pub fn get_shortest_path_djk<K: Kmer, D>(graph: &Graph<K>, start_node: (usize, Dir), end_node: (usize, Dir), f_dist: D) -> Result<DnaString, PathwayError<K>>
 where D: Fn(usize) -> usize
 {
     let mut parents= AHashMap::default();
@@ -137,6 +145,7 @@ where D: Fn(usize) -> usize
         return Err(PathwayError::NoPathExists);
     }
 
+    // reconstruct the path by backtracking the visited nodes
     let mut path = Vec::new();
     let mut node = end_node;
 
@@ -150,70 +159,56 @@ where D: Fn(usize) -> usize
     Ok(graph.sequence_of_path(path.iter()))
 }
 
-// search a kmer by iterating over all the graph.
-// Result = (node_id, direction) where (direction == left) => kmer found when reading from left to right
-fn search_kmer<K: Kmer>(graph: &DebruijnGraph<K, ()>, kmer: K) -> Option<(usize, Dir)> {
-    let rc = kmer.rc();
-    for node_id in 0..graph.len() {
-        for k in graph.get_node_kmer(node_id) {
-            if k == kmer {
-                return Some((node_id, Dir::Left));
-            } else if k == rc {
-                return Some((node_id, Dir::Right));
-            }
-        }
-    }
-    None
-}
-// search a kmer at the beginning of a unitig. if not found, search by iterating the whole graph.
-fn get_start_node<K: Kmer>(graph: &DebruijnGraph<K, ()>, kmer: K) -> Result<(usize, Dir), PathwayError<K>> {
-    graph.find_link(kmer, Dir::Right).map(|(id, dir, _)| (id, dir))
-        .or_else(|| search_kmer(graph, kmer))
-        .ok_or(PathwayError::FirstKmerNotFound(kmer))
-}
-// search a kmer at the end of a unitig. if not found, search by iterating the whole graph.
-fn get_end_node<K: Kmer>(graph: &DebruijnGraph<K, ()>, kmer: K) -> Result<(usize, Dir), PathwayError<K>> {
-    graph.find_link(kmer, Dir::Left).map(|(id, dir, _)| (id, dir.flip()))
-        .or_else(|| search_kmer(graph, kmer))
-        .ok_or(PathwayError::LastKmerNotFound(kmer))
-}
-
 /// Wrapper for finding the shortest path in terms of nodes between two kmers.
 /// The kmers must mark the extremities of a unitig in the graph.
-pub fn get_shortest_path_nodes<K: Kmer>(graph: &DebruijnGraph<K, ()>, start: K, end: K) -> Result<DnaString, PathwayError<K>> {
-    let start = get_start_node(graph, start)?;
-    let end = get_end_node(graph, end)?;
-    get_shortest_path_bfs::<K>(graph, start, end)
+pub fn get_shortest_path_nodes<K: Kmer>(graph: &Graph<K>, start: K, end: K) -> Result<DnaString, PathwayError<K>> {
+    let (start, start_offset) = search_kmer_offset(graph, start, Dir::Left)
+        .ok_or(PathwayError::KmerNotFound(start))?;
+    let (end, end_offset) = search_kmer_offset(graph, end, Dir::Right)
+        .ok_or(PathwayError::KmerNotFound(end))?;
+    let path = get_shortest_path_bfs::<K>(graph, start, end)?;
+    let path = path.slice(start_offset, path.len()-end_offset);
+    Ok(path.to_owned())
 }
 
 /// Wrapper for finding the shortest path in terms of nucleotides between two kmers.
 /// The kmers must mark the extremities of a unitig in the graph.
-pub fn get_shortest_path_distance<K: Kmer>(graph: &DebruijnGraph<K, ()>, start: K, end: K) -> Result<DnaString, PathwayError<K>> {
-    let start = get_start_node(graph, start)?;
-    let end = get_end_node(graph, end)?;
-    get_shortest_path_djk(graph, start, end, |node_len| node_len)
+pub fn get_shortest_path_distance<K: Kmer>(graph: &Graph<K>, start: K, end: K) -> Result<DnaString, PathwayError<K>> {
+    let (start, start_offset) = search_kmer_offset(graph, start, Dir::Left)
+        .ok_or(PathwayError::KmerNotFound(start))?;
+    let (end, end_offset) = search_kmer_offset(graph, end, Dir::Right)
+        .ok_or(PathwayError::KmerNotFound(end))?;
+    let path = get_shortest_path_djk(graph, start, end, |node_len| node_len)?;
+    let path = path.slice(start_offset, path.len()-end_offset);
+    println!("End offset: {}", end_offset);
+    Ok(path.to_owned())
 }
+
+//####################################################################################
+//                       Find the checkpoints                                       //
+//####################################################################################
 
 // Get the node corresponding to the next kmer in the haplotype
 // and advances the kmer iterator to the end of the node
 // returns None if the iterator is empty, and an error if the kmer is not found in the graph
-fn get_next_node<K: Kmer>(graph: &DebruijnGraph<K, ()>, kmer_iter: &mut impl Iterator<Item=K>) -> Result<Option<(usize, Dir)>, PathwayError<K>> {
+fn get_next_node<K: Kmer>(graph: &Graph<K>, kmer_iter: &mut impl Iterator<Item=K>) -> Result<Option<(usize, Dir)>, PathwayError<K>> {
     let kmer = kmer_iter.next();
     if kmer.is_none() {
         return Ok(None);
     }
     let kmer = kmer.unwrap();
-    let node = get_start_node(graph, kmer)?;
+    let node = search_kmer(graph, kmer, Dir::Left).ok_or(PathwayError::KmerNotFound(kmer))?;    // kmer iterator not at the beginning of a unitig
     let node_length = graph.get_node(node.0).len();
     if node_length > K::k() {
         kmer_iter.nth(node_length-K::k()-1);
         // TODO: check that the sequence of the current unitig corresponds to the skipped kmers in the haplotype ?
     }
     Ok(Some(node))
-}
+    }
 
 /// Breaks the input haplotype into segments corresponding to shortest paths (nb of nodes) in the graph.
-pub fn get_checkpoints_bfs<K: Kmer>(graph: &DebruijnGraph<K,()>, haplo: &DnaRecord) -> Result<Vec<(usize, Dir)>, PathwayError<K>> {
+// TODO: enforce check that the haplotype is acvtually in the graph
+pub fn get_checkpoints_bfs<K: Kmer>(graph: &Graph<K>, haplo: &DnaRecord) -> Result<Vec<(usize, Dir)>, PathwayError<K>> {
     let mut chunks = Vec::new();
     let mut kmer_iter = haplo.iter_kmers::<K>(false);
 
@@ -225,7 +220,7 @@ pub fn get_checkpoints_bfs<K: Kmer>(graph: &DebruijnGraph<K,()>, haplo: &DnaReco
     loop {
         // initialise the BFS
         current_node = next_node.unwrap();
-        let mut frontier_set: Vec<(usize, Dir)> = Vec::new();
+        let mut frontier_set: Vec<(usize, Dir)>;
         let mut next_set: Vec<(usize, Dir)> = vec![current_node];
         let mut visited: AHashSet<(usize, Dir)> = AHashSet::default();
         visited.insert(current_node);
@@ -261,7 +256,7 @@ pub fn get_checkpoints_bfs<K: Kmer>(graph: &DebruijnGraph<K,()>, haplo: &DnaReco
             }
 
             // should not happen: the next node was not visited in this level. Some edges are missing ?
-            // assert!(visited.contains(&next_node), "next node not found in the frontier set");
+            assert!(visited.contains(&next_node), "next node not found in the frontier set");
         }
     }
 }
@@ -286,6 +281,14 @@ mod unit_test {
         DnaBytes(SEQ.iter().map(|&b| base_to_bits(b)).collect())
     }
 
+    fn expected_checkpoints() -> Vec<(usize, Dir)> {
+        vec![
+            (0, Dir::Left),
+            (3, Dir::Left),
+            (2, Dir::Left),
+        ]
+    }
+
     #[test]
     fn test_shortest_path() {
         let seq = make_seq();
@@ -307,11 +310,15 @@ mod unit_test {
     fn test_get_checkpoints() {
         let haplo = DnaRecord::new(String::from("test"), SEQ.to_vec());
         let graph = graph::graph_from_unitigs_serial::<Kmer3>(PATH, true);
+        let checkpoints = get_checkpoints_bfs(&graph, &haplo).unwrap();
 
-        println!("{:?}", graph.base.sequences);
-        graph.print();
-        println!();
-        let chunks = get_checkpoints_bfs(&graph, &haplo).unwrap();
-        println!("Checkpoints: {:?}", chunks);
+        // println!("{:?}", graph.base.sequences);
+        // graph.print();
+        // println!();
+        // println!("Checkpoints: {:?}", checkpoints);
+
+        let expected = expected_checkpoints();
+        assert_eq!(checkpoints, expected);
+        
     }
 }

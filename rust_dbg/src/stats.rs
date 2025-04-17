@@ -4,10 +4,12 @@ use std::io::Write;
 use std::time::Instant;
 
 use crate::fasta_reader::FastaReader;
-use debruijn::{Kmer, Dir, graph::DebruijnGraph};
+use crate::Graph;
+use crate::{search_kmer, search_kmer_offset};
+use debruijn::{Kmer, Dir};
 
 /// Print some stats about the graph
-pub fn stats_graph<K: Kmer>(graph: &DebruijnGraph<K,()>) {
+pub fn stats_graph<K: Kmer>(graph: &Graph<K>) {
     print!("Iterating graph... ");
     std::io::stdout().flush().unwrap();
     let start = Instant::now();
@@ -26,7 +28,7 @@ pub fn stats_graph<K: Kmer>(graph: &DebruijnGraph<K,()>) {
 }
 
 /// Count the number of breakpoints in a graph, for a given haplotype
-pub fn stats_haplo<K: Kmer>(graph: &DebruijnGraph<K,()>, haplo: FastaReader) {
+pub fn stats_haplo<K: Kmer>(graph: &Graph<K>, haplo: FastaReader) {
     print!("Iterating haplo... ");
     std::io::stdout().flush().unwrap();
     let start = Instant::now();
