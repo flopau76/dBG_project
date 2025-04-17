@@ -16,7 +16,8 @@ use std::io::Write;
 #[derive(Debug)]
 pub enum PathwayError<K> {
     NoPathExists,
-    KmerNotFound(K)
+    KmerNotFound(K),
+    UnitigNotMatching,
 }
 impl<K: Kmer> Error for PathwayError<K> {}
 impl<K: Kmer> std::fmt::Display for PathwayError<K> {
@@ -24,6 +25,7 @@ impl<K: Kmer> std::fmt::Display for PathwayError<K> {
         match self {
             PathwayError::NoPathExists => write!(f, "No path found between the given k-mers"),
             PathwayError::KmerNotFound(kmer) => write!(f, "Kmer not found: {:?}", kmer),
+            PathwayError::UnitigNotMatching => write!(f, "Unitig does not match the input haplotype"),
         }
     }
 }
@@ -188,63 +190,83 @@ pub fn get_shortest_path_distance<K: Kmer>(graph: &Graph<K>, start: K, end: K) -
 //                       Find the checkpoints                                       //
 //####################################################################################
 
-// Get the node corresponding to the next kmer in the haplotype
-// and advances the kmer iterator to the end of the node
-// returns None if the iterator is empty, and an error if the kmer is not found in the graph
-fn get_next_node<K: Kmer>(graph: &Graph<K>, kmer_iter: &mut impl Iterator<Item=K>) -> Result<Option<(usize, Dir)>, PathwayError<K>> {
-    let kmer = kmer_iter.next();
-    if kmer.is_none() {
-        return Ok(None);
-    }
-    let kmer = kmer.unwrap();
-    let node = search_kmer(graph, kmer, Dir::Left).ok_or(PathwayError::KmerNotFound(kmer))?;    // kmer iterator not at the beginning of a unitig
-    let node_length = graph.get_node(node.0).len();
-    if node_length > K::k() {
-        kmer_iter.nth(node_length-K::k()-1);
-        // TODO: check that the sequence of the current unitig corresponds to the skipped kmers in the haplotype ?
-    }
-    Ok(Some(node))
+// Advances the kmer iterator to the start of the next node, if any.
+// Raises an error if the current node does not coincide with the kmer_iterator.
+fn get_next_node<K: Kmer>(graph: &Graph<K>, kmer_iter: &mut impl Iterator<Item=K>, node: (usize, Dir), offset: usize) -> Result<Option<(usize, Dir)>, PathwayError<K>> {
+    let (node_id, dir) = node;
+    let mut node_seq = graph.get_node(node_id).sequence();
+    if dir == Dir::Right { node_seq = node_seq.rc(); }
+    let nb_kmers_in_node = node_seq.len() - K::k() + 1;
+
+    // advance the iterator to the last kmer the current node
+    for i in offset+1..nb_kmers_in_node {
+        let expected_base = node_seq.get(i + K::k()-1);
+        let kmer = kmer_iter.next();
+        if kmer.is_none() {
+            return Ok(None);
+        }
+        let kmer = kmer.unwrap();
+        if expected_base != kmer.get(K::k()-1) {
+            return Err(PathwayError::UnitigNotMatching);
+        }
     }
 
+    // get the next node
+    let next_kmer = kmer_iter.next();
+    if next_kmer.is_none() {
+        return Ok(None);
+    }
+    let next_kmer = next_kmer.unwrap();
+    let next_node = search_kmer(graph, next_kmer, Dir::Left);
+    Ok(next_node)
+}
+
 /// Breaks the input haplotype into segments corresponding to shortest paths (nb of nodes) in the graph.
-// TODO: enforce check that the haplotype is acvtually in the graph
+
+// TODO: save start and end offset ?
+// TODO: this will loop forever if start and end are the same
 pub fn get_checkpoints_bfs<K: Kmer>(graph: &Graph<K>, haplo: &DnaRecord) -> Result<Vec<(usize, Dir)>, PathwayError<K>> {
     let mut chunks = Vec::new();
     let mut kmer_iter = haplo.iter_kmers::<K>(false);
 
-    let mut current_node;
-    let mut next_node = get_next_node(graph, &mut kmer_iter)?;
-    chunks.push(next_node.expect("Haplotype is empty"));
+    let start_kmer = kmer_iter.next().expect("Empty haplotype");
+    let (start_node, start_offset) = search_kmer_offset(graph, start_kmer, Dir::Left)
+        .ok_or(PathwayError::KmerNotFound(start_kmer))?;
+
+
+    let mut current_node = start_node;
+    let mut next_node = get_next_node(graph, &mut kmer_iter, start_node, start_offset)?;
+
+    chunks.push(start_node);
+
 
     // start a new BFS
     loop {
         // initialise the BFS
-        current_node = next_node.unwrap();
-        let mut frontier_set: Vec<(usize, Dir)>;
-        let mut next_set: Vec<(usize, Dir)> = vec![current_node];
+        let mut frontier_set: Vec<(usize, Dir)> = vec![current_node];
+        let mut next_set: Vec<(usize, Dir)> = Vec::new();
         let mut visited: AHashSet<(usize, Dir)> = AHashSet::default();
         visited.insert(current_node);
 
+        let mut depth: usize = 0;
+
         // continue the current BFS
         loop {
-            // advance in the haplotype
-            current_node = next_node.unwrap();
-            next_node = get_next_node(graph, &mut kmer_iter)?;
             if next_node.is_none() {
                 chunks.push(current_node);
                 return Ok(chunks);
             }
-            let next_node = next_node.unwrap();
 
-            // if the next node was allready visited: end the current BFS and start a new one
-            if visited.contains(&next_node) {
+            let target = next_node.unwrap();
+            assert!(target != current_node);
+            if visited.contains(&target) {
                 chunks.push(current_node);
+                println!("\tFound a cycle of size {}", depth);
                 break;
             }
 
             // explore the next level of the BFS
-            frontier_set = next_set;
-            next_set = Vec::new();
+            depth += 1;
             while let Some(node) = frontier_set.pop() {
                 let edges = graph.get_node(node.0).edges(node.1.flip());
                 for neigh_node in edges.into_iter().map(|(id, dir, _)| (id, dir)) {
@@ -254,11 +276,17 @@ pub fn get_checkpoints_bfs<K: Kmer>(graph: &Graph<K>, haplo: &DnaRecord) -> Resu
                     }
                 }
             }
+            frontier_set = next_set;
+            next_set = Vec::new();
 
-            // should not happen: the next node was not visited in this level. Some edges are missing ?
-            assert!(visited.contains(&next_node), "next node not found in the frontier set");
+            assert!(visited.contains(&target));
+
+            // advance the kmer iterator to the next node
+            current_node = target;
+            next_node = get_next_node(graph, &mut kmer_iter, current_node, 0)?;
         }
     }
+    Ok(chunks)
 }
 
 

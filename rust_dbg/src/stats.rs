@@ -5,7 +5,6 @@ use std::time::Instant;
 
 use crate::fasta_reader::FastaReader;
 use crate::Graph;
-use crate::{search_kmer, search_kmer_offset};
 use debruijn::{Kmer, Dir};
 
 /// Print some stats about the graph
@@ -28,6 +27,7 @@ pub fn stats_graph<K: Kmer>(graph: &Graph<K>) {
 }
 
 /// Count the number of breakpoints in a graph, for a given haplotype
+#[deprecated]
 pub fn stats_haplo<K: Kmer>(graph: &Graph<K>, haplo: FastaReader) {
     print!("Iterating haplo... ");
     std::io::stdout().flush().unwrap();

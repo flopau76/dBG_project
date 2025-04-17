@@ -79,28 +79,28 @@ fn load_graph<K: Kmer + for<'a> Deserialize<'a>>(path_bin: &str) -> DebruijnGrap
 
 /// Decompose the records in a fasta file into a suite a nodes in the graph and save them to a file.
 fn get_checkpoints<K: Kmer>(graph: &DebruijnGraph<K,()>, path_fasta: &str, path_chunks: &str) {
-    // let fasta_reader = FastaReader::new(path_fasta).unwrap();
-    // let mut file_chunks = BufWriter::new(File::create(path_chunks).unwrap());
+    let fasta_reader = FastaReader::new(path_fasta).unwrap();
+    let mut file_chunks = BufWriter::new(File::create(path_chunks).unwrap());
 
-    // let mut count: usize = 0;
-    // for record in fasta_reader.skip(count) {
-    //     count += 1;
-    //     // dividing the record into chunks
-    //     println!("Processing record: {}", record.header());
-    //     let start = Instant::now();
-    //     let path = path::get_checkpoints_bfs(&graph, &record).unwrap();
-    //     let duration = start.elapsed();
-    //     println!("  - divided record into {} chunks\n  - time elapsed: {:?}", path.len(), duration);
+    let mut count: usize = 0;
+    for record in fasta_reader.skip(count) {
+        count += 1;
+        // dividing the record into chunks
+        println!("Processing record: {}", record.header());
+        let start = Instant::now();
+        let path = path::get_checkpoints_bfs(&graph, &record).unwrap();
+        let duration = start.elapsed();
+        println!("  - divided record into {} chunks\n  - time elapsed: {:?}", path.len(), duration);
 
-    //     // saving them to the file
-    //     writeln!(file_chunks, ">{}\tlen: {}\tdone in: {:?}", record.header(), path.len(), duration).unwrap();
-    //     for chunk in path {
-    //         let start_kmer = chunk.0;
-    //         let end_kmer = chunk.1;
-    //         writeln!(file_chunks, "{:?}\t\t{:?}", start_kmer, end_kmer).unwrap();
-    //     }
-    //     file_chunks.flush().unwrap();
-    // }
+        // saving them to the file
+        writeln!(file_chunks, ">{}\tlen: {}\tdone in: {:?}", record.header(), path.len(), duration).unwrap();
+        for chunk in path {
+            let start_kmer = chunk.0;
+            let end_kmer = chunk.1;
+            writeln!(file_chunks, "{:?}\t\t{:?}", start_kmer, end_kmer).unwrap();
+        }
+        file_chunks.flush().unwrap();
+    }
 }
 
 /// Reconstruct the records from a fasta file based on their decomposition into chunks.
