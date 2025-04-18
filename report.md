@@ -148,21 +148,14 @@ Pour l'instant, on reste sur du BFS (minimum de noeuds dans le graphe compacté)
 Scale up -> test avec d'autre génomes.
 
 ### 15/04 au ...
-Algorithm to get checkpoints for a given haplotype.
+Correction de l'algorithme pour decomposer le chemin en bout de plus court chemins.
 
-# TODO:
-Modifier le format de save chunks:
+TODO:
 - préciser lorsque le premier/dernier unitig n'est pas parcouru en entier 
+- régler les cas d'ambiguités: pour l'instant, entre deux checkpoints, haplo = un des plus courts chemins
 - regarder s'il vaut mieux fusionner end_i et start_i+1 (plus logique/symêtrique) / encoder start_i+1 par la base à ajouter à end_i
-    -> si end_i = start_i+1 (same unitig répété plusieurs fois), ça boucle
-
-Regarder les chunks obtenus en detail:
-- chunks particulierements petits
-- chunks répétés ?
-
-Comparer aux solutions existantes: dbg coloré, vg sans perte d'info. Attention: solution state of the art en espace mémoire ou en query time.
-
-Que faire lorsqu'il y  plusieurs chemins de même longueur ? Pour l'instant, un chunk est valide si le bon chemin fait parti des chemins les plus court. Mais lors de la reconstruction, on en prend un au pif, pas forcement le bon.
+- Regarder les chunks obtenus en detail: chunks particulierements petits/répétés ?
+- Comparer aux solutions existantes: dbg coloré, vg sans perte d'info. Attention: solution state of the art en espace mémoire ou en query time.
 
 ## Comparaison crates rust
 #### Ragnar Groot: packed-seq, ptr-hash, simd-minimizers
