@@ -82,11 +82,10 @@ fn get_checkpoints<K: Kmer>(graph: &DebruijnGraph<K,()>, path_fasta: &str, path_
     let fasta_reader = FastaReader::new(path_fasta).unwrap();
     let mut file_chunks = BufWriter::new(File::create(path_chunks).unwrap());
 
-    let mut count: usize = 0;
-    for record in fasta_reader.skip(count) {
-        count += 1;
+    for record in fasta_reader {
         // dividing the record into chunks
         eprintln!("Processing record: {}", record.header());
+        println!(">{}", record.header());
         let start = Instant::now();
         let path = path::get_checkpoints_bfs(&graph, &record).unwrap();
         let duration = start.elapsed();
