@@ -17,7 +17,7 @@ fn main() {
     // input/output files
     let path_graph = "../data/output/chr1/AalbF5_k31.fna";
     let path_bin = "../data/output/chr1/AalbF5_k31.bin";
-    let path_fasta = "../data/input/chr1/AalbF5.fna";
+    let path_fasta = "../data/input/chr1/AalbF5_splitN.fna";
     let path_chunks = "../data/output/chr1/chunks_nodes.AalbF5.fna";
     let path_reconstruct = "../data/output/chr1/reconstruct_nodes.AalbF5.fna";
 
@@ -25,12 +25,12 @@ fn main() {
     let stranded = false;
     type Kmer31 = kmer::VarIntKmer<u64, kmer::K31>;
 
-    // let graph = make_graph::<Kmer31>(path_graph, stranded);
-    // save_graph(&graph, path_bin);
+    let graph = make_graph::<Kmer31>(path_graph, stranded);
+    save_graph(&graph, path_bin);
     let graph = load_graph::<Kmer31>(path_bin);
 
     get_checkpoints(&graph, path_fasta, path_chunks);
-    // reconstruct_fasta(&graph, path_chunks, path_reconstruct);
+    reconstruct_fasta(&graph, path_chunks, path_reconstruct);
 }
 
 /// Create a graph from a unitigs file.
