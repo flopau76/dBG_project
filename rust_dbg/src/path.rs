@@ -274,7 +274,7 @@ fn get_next_checkpoint<K: Kmer, D: Vmer>(graph: &Graph<K>, unitig_iter: &mut Uni
     let mut next_node = match unitig_iter.next()? {
         Some(node) => node,
         None => {
-            println!("Path of length 0:\t {:?}\t {:?}", start_node, current_node);
+            println!("length 0:\t {:?}\t {:?}", start_node, current_node);
             return Ok(Some((start_node, current_node)))
         },
     };
@@ -307,13 +307,10 @@ fn get_next_checkpoint<K: Kmer, D: Vmer>(graph: &Graph<K>, unitig_iter: &mut Uni
         current_node = next_node;
         next_node = match unitig_iter.next()? {
             Some(node) => node,
-            None => {
-                println!("Path of length 0:\t {:?}\t {:?}", start_node, current_node);
-                return Ok(Some((start_node, current_node)))
-            },
+            None => break
         };
     }
-    println!("Path of length {}:\t {:?}\t {:?}", depth, start_node, current_node);
+    println!("length {}:\t {:?}\t {:?}", depth, start_node, current_node);
     Ok(Some((start_node, current_node)))
 }
 

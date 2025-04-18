@@ -18,8 +18,8 @@ fn main() {
     let path_graph = "../data/output/chr1/AalbF5_k31.fna";
     let path_bin = "../data/output/chr1/AalbF5_k31.bin";
     let path_fasta = "../data/input/chr1/AalbF5_splitN.fna";
-    let path_chunks = "../data/output/chr1/chunks_nodes.AalbF5.fna";
-    let path_reconstruct = "../data/output/chr1/reconstruct_nodes.AalbF5.fna";
+    let path_chunks = "../data/output/chr1/chunks_double.AalbF5.fna";
+    // let path_reconstruct = "../data/output/chr1/reconstruct_nodes.AalbF5.fna";
 
     // params used for kmer construction by ggcat
     let stranded = false;
@@ -30,27 +30,27 @@ fn main() {
     let graph = load_graph::<Kmer31>(path_bin);
 
     get_checkpoints(&graph, path_fasta, path_chunks);
-    reconstruct_fasta(&graph, path_chunks, path_reconstruct);
+    // reconstruct_fasta(&graph, path_chunks, path_reconstruct);
 }
 
 /// Create a graph from a unitigs file.
 fn make_graph<K: Kmer + Send + Sync>(path_graph: &str, stranded: bool) -> DebruijnGraph<K,()> {
-    print!("Creating graph (parallel)... ");
-    std::io::stdout().flush().unwrap();
+    eprint!("Creating graph (parallel)... ");
+    std::io::stderr().flush().unwrap();
     let start = Instant::now();
 
     let graph = graph::graph_from_unitigs(path_graph, stranded);
 
     let duration = start.elapsed();
-    println!("done in {:?}", duration);
+    eprintln!("done in {:?}", duration);
 
     graph
 }
 
 /// Save a graph to a binary file.
 fn save_graph<K: Kmer + Serialize>(graph: &DebruijnGraph<K,()>, path_bin: &str) {
-    print!("Saving graph... ");
-    std::io::stdout().flush().unwrap();
+    eprint!("Saving graph... ");
+    std::io::stderr().flush().unwrap();
     let start = Instant::now();
 
     let mut f = BufWriter::new(File::create(path_bin).unwrap());
@@ -58,13 +58,13 @@ fn save_graph<K: Kmer + Serialize>(graph: &DebruijnGraph<K,()>, path_bin: &str) 
     let _ = encode_into_std_write(graph, &mut f, config).unwrap();
 
     let duration = start.elapsed();
-    println!("done in {:?}", duration);
+    eprintln!("done in {:?}", duration);
 }
 
 /// Load a graph from a binary file.
 fn load_graph<K: Kmer + for<'a> Deserialize<'a>>(path_bin: &str) -> DebruijnGraph<K,()> {
-    print!("Loading graph... ");
-    std::io::stdout().flush().unwrap();
+    eprint!("Loading graph... ");
+    std::io::stderr().flush().unwrap();
     let start = Instant::now();
 
     let mut f = BufReader::new(File::open(path_bin).unwrap());
@@ -72,7 +72,7 @@ fn load_graph<K: Kmer + for<'a> Deserialize<'a>>(path_bin: &str) -> DebruijnGrap
     let graph = decode_from_std_read(&mut f, config).unwrap();
 
     let duration = start.elapsed();
-    println!("done in {:?}", duration);
+    eprintln!("done in {:?}", duration);
 
     graph
 }
@@ -86,11 +86,12 @@ fn get_checkpoints<K: Kmer>(graph: &DebruijnGraph<K,()>, path_fasta: &str, path_
     for record in fasta_reader.skip(count) {
         count += 1;
         // dividing the record into chunks
-        println!("Processing record: {}", record.header());
+        eprintln!("Processing record: {}", record.header());
+        println!(">{}", record.header());
         let start = Instant::now();
         let path = path::get_checkpoints_bfs(&graph, &record).unwrap();
         let duration = start.elapsed();
-        println!("  - divided record into {} chunks\n  - time elapsed: {:?}", path.len(), duration);
+        eprintln!("  - divided record into {} chunks\n  - time elapsed: {:?}", path.len(), duration);
 
         // saving them to the file
         writeln!(file_chunks, ">{}\tlen: {}\tdone in: {:?}", record.header(), path.len(), duration).unwrap();
@@ -133,7 +134,7 @@ fn reconstruct_fasta<K: Kmer>(graph: &DebruijnGraph<K,()>, file_chunks: &str, fi
                 nb_chunks = 0;
             }
             header = line.trim_start_matches('>').split("\t").next().unwrap().to_owned();
-            println!("Processing record: {}", header);
+            eprintln!("Processing record: {}", header);
             continue;
         }
         // parse the line to get the start and end nodes
