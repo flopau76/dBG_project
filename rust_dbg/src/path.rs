@@ -263,29 +263,31 @@ impl<'a, K: Kmer, D: Vmer> UnitigIterator<'a, K, D> {
     }
 }
 
-// performs a BFS to find the next checkpoints in the graph
-fn get_next_checkpoint<K: Kmer, D: Vmer>(graph: &Graph<K>, unitig_iter: &mut UnitigIterator<K,D>) -> Result<Option<((usize, Dir),(usize, Dir))>, PathwayError<K>> {
-    let start_node = match unitig_iter.current()? {
+/// Performs a BFS to find the next checkpoints in the graph
+// `start_node` is the node where the BFS starts. It must correspond to the one just before `unitig_iter.current_node`
+// `unitig_iter` is advanced one node after the returned one.
+fn get_next_checkpoint<K: Kmer, D: Vmer>(graph: &Graph<K>, start_node: (usize, Dir), unitig_iter: &mut UnitigIterator<K,D>) -> Result<Option<(usize, Dir)>, PathwayError<K>> {
+    let mut current_node = start_node;
+    let mut next_node = match unitig_iter.current_node {
         Some(node) => node,
         None => return Ok(None),
     };
 
-    let mut current_node = start_node;
-    let mut next_node = match unitig_iter.next()? {
-        Some(node) => node,
-        None => {
-            println!("Path of length 0:\t {:?}\t {:?}", start_node, current_node);
-            return Ok(Some((start_node, current_node)))
-        },
-    };
+    //edge case: path of length 0 (ie the same unitig is repeated several times)
+    if current_node == next_node {
+        let _ = unitig_iter.next()?;
+        println!("length 0:\t {:?}\t {:?}", start_node, current_node);
+        return Ok(Some(current_node));
+    }
 
-
-    let mut frontier_set: Vec<(usize, Dir)> = vec![current_node];
+    // initialise the BFS
+    let mut depth: usize = 0;
+    let mut frontier_set: Vec<(usize, Dir)> = vec![start_node];
     let mut next_set: Vec<(usize, Dir)> = Vec::new();
     let mut visited: AHashSet<(usize, Dir)> = AHashSet::default();
-    visited.insert(current_node);
+    visited.insert(start_node);
 
-    let mut depth: usize = 0;
+    // the record coincides with the BFS => it is the shortest path
     while !visited.contains(&next_node) {
         // explore the next level of the BFS
         depth += 1;
@@ -295,6 +297,9 @@ fn get_next_checkpoint<K: Kmer, D: Vmer>(graph: &Graph<K>, unitig_iter: &mut Uni
                 let new = visited.insert(neigh_node);
                 if new {
                     next_set.push(neigh_node);
+                }
+                if neigh_node == next_node && !new  {
+                    break;  // two different paths exist
                 }
             }
         }
@@ -307,24 +312,26 @@ fn get_next_checkpoint<K: Kmer, D: Vmer>(graph: &Graph<K>, unitig_iter: &mut Uni
         current_node = next_node;
         next_node = match unitig_iter.next()? {
             Some(node) => node,
-            None => {
-                println!("Path of length 0:\t {:?}\t {:?}", start_node, current_node);
-                return Ok(Some((start_node, current_node)))
-            },
+            None => break
         };
     }
-    println!("Path of length {}:\t {:?}\t {:?}", depth, start_node, current_node);
-    Ok(Some((start_node, current_node)))
+    println!("length {}:\t {:?}\t {:?}", depth, start_node, current_node);
+    Ok(Some(current_node))
 }
 
 /// Breaks the input haplotype into segments corresponding to shortest paths (nb of nodes) in the graph.
-pub fn get_checkpoints_bfs<K: Kmer>(graph: &Graph<K>, haplo: &DnaRecord) -> Result<Vec<((usize, Dir),(usize, Dir))>, PathwayError<K>> {
+pub fn get_checkpoints_bfs<K: Kmer>(graph: &Graph<K>, haplo: &DnaRecord) -> Result<Vec<(usize, Dir)>, PathwayError<K>> {
     let seq = haplo.dna_string();
     let mut unitig_iter = UnitigIterator::new(graph, &seq);
     let mut checkpoints = Vec::new();
 
-    while let Some(node) = get_next_checkpoint(graph, &mut unitig_iter)? {
-        checkpoints.push(node);
+    let mut current_node = unitig_iter.current()?.expect("Haplotype is empty");
+    let _ = unitig_iter.next()?;
+    checkpoints.push(current_node);
+
+    while let Some(next_node) = get_next_checkpoint(graph, current_node, &mut unitig_iter)? {
+        checkpoints.push(next_node);
+        current_node = next_node;
     }
     Ok(checkpoints)
 }
