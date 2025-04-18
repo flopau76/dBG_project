@@ -17,7 +17,7 @@ fn main() {
     // input/output files
     let path_graph = "../data/output/chr1/AalbF5_k31.fna";
     let path_bin = "../data/output/chr1/AalbF5_k31.bin";
-    let path_fasta = "../data/input/chr1/AalbF5.fna";
+    let path_fasta = "../data/input/chr1/AalbF5_splitN.fna";
     let path_chunks = "../data/output/chr1/chunks_nodes.AalbF5.fna";
     let path_reconstruct = "../data/output/chr1/reconstruct_nodes.AalbF5.fna";
 
@@ -79,7 +79,6 @@ fn load_graph<K: Kmer + for<'a> Deserialize<'a>>(path_bin: &str) -> DebruijnGrap
 
 /// Decompose the records in a fasta file into a suite a nodes in the graph and save them to a file.
 fn get_checkpoints<K: Kmer>(graph: &DebruijnGraph<K,()>, path_fasta: &str, path_chunks: &str) {
-    println!("Cutting fasta file into chunks... ");
     let fasta_reader = FastaReader::new(path_fasta).unwrap();
     let mut file_chunks = BufWriter::new(File::create(path_chunks).unwrap());
 
