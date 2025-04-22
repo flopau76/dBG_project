@@ -147,22 +147,25 @@ __________________
 Pour l'instant, on reste sur du BFS (minimum de noeuds dans le graphe compacté) et pas du Djikistra. Plus tard, possibilité de tester avec d'autre distance, en fonction des réalités biologiques (pénaliser les petits unitigs par exemple).  
 Scale up -> test avec d'autre génomes.
 
-### 15/04 au ...
-Algorithm to get checkpoints for a given haplotype.
+### 15/04 au 18/04
+Correction de l'algorithme pour decomposer le chemin en bout de plus court chemins.
 
-# TODO:
-Modifier le format de save chunks:
-- préciser lorsque le premier/dernier unitig n'est pas parcouru en entier 
-- regarder s'il vaut mieux fusionner end_i et start_i+1 (plus logique/symêtrique) / encoder start_i+1 par la base à ajouter à end_i
-    -> si end_i = start_i+1 (same unitig répété plusieurs fois), ça boucle
+TODO:
+[-] préciser lorsque le premier/dernier unitig n'est pas parcouru en entier 
+[X] régler les cas d'ambiguités (plusieurs plus court chemin possible)
+[-] regarder s'il vaut mieux fusionner end_i et start_i+1 (plus logique/symétrique) / encoder start_i+1 par la base à ajouter à end_i
+[ ] Regarder les chunks obtenus en detail: chunks particulierements petits/répétés ?
+[ ] Comparer aux solutions existantes: dbg coloré, vg sans perte d'info. Attention: solution state of the art en espace mémoire ou en query time.
 
-Regarder les chunks obtenus en detail:
-- chunks particulierements petits
-- chunks répétés ?
+__________________
+## Réunion du 15/04
+Prochaine étape: fouille de donnée.
+- histogramme de nb de nucléotides par bout de chemin
+- histogramme du ratio nb de breackpoints / coût d'encodage
+- affichage le long du chromosome
+- caractériser les bouts de chemins répétés
+Pour plus tard: mixer les méthodes. Que se passe t'il en ajoutant des  haplotypes ? Gain d'encodage en mémorisant un "chemin de référence" et en stockant les variations par rapport à ce chemin.
 
-Comparer aux solutions existantes: dbg coloré, vg sans perte d'info. Attention: solution state of the art en espace mémoire ou en query time.
-
-Que faire lorsqu'il y  plusieurs chemins de même longueur ? Pour l'instant, un chunk est valide si le bon chemin fait parti des chemins les plus court. Mais lors de la reconstruction, on en prend un au pif, pas forcement le bon.
 
 ## Comparaison crates rust
 #### Ragnar Groot: packed-seq, ptr-hash, simd-minimizers
