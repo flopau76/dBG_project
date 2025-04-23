@@ -18,18 +18,18 @@ fn main() {
     let path_graph = "../data/output/chr1/AalbF5_k31.fna";
     let path_bin = "../data/output/chr1/AalbF5_k31.bin";
     let path_fasta = "../data/input/chr1/AalbF5_splitN.fna";
-    let path_chunks = "../data/output/chr1/chunks_double.AalbF5.fna";
+    // let path_chunks = "../data/output/chr1/chunks_double.AalbF5.fna";
     // let path_reconstruct = "../data/output/chr1/reconstruct_nodes.AalbF5.fna";
 
     // params used for kmer construction by ggcat
     let stranded = false;
     type Kmer31 = kmer::VarIntKmer<u64, kmer::K31>;
 
-    let graph = make_graph::<Kmer31>(path_graph, stranded);
-    save_graph(&graph, path_bin);
+    // let graph = make_graph::<Kmer31>(path_graph, stranded);
+    // save_graph(&graph, path_bin);
     let graph = load_graph::<Kmer31>(path_bin);
 
-    get_checkpoints(&graph, path_fasta, path_chunks);
+    get_checkpoints(&graph, path_fasta);
     // reconstruct_fasta(&graph, path_chunks, path_reconstruct);
 }
 
@@ -77,14 +77,11 @@ fn load_graph<K: Kmer + for<'a> Deserialize<'a>>(path_bin: &str) -> DebruijnGrap
     graph
 }
 
-/// Decompose the records in a fasta file into a suite a nodes in the graph and save them to a file.
-fn get_checkpoints<K: Kmer>(graph: &DebruijnGraph<K,()>, path_fasta: &str, path_chunks: &str) {
+/// Decompose the records in a fasta file into a suite a nodes in the graph. Result is writen to stdout.
+fn get_checkpoints<K: Kmer>(graph: &DebruijnGraph<K,()>, path_fasta: &str) {
     let fasta_reader = FastaReader::new(path_fasta).unwrap();
-    let mut file_chunks = BufWriter::new(File::create(path_chunks).unwrap());
 
-    let mut count: usize = 0;
-    for record in fasta_reader.skip(count) {
-        count += 1;
+    for record in fasta_reader {
         // dividing the record into chunks
         eprintln!("Processing record: {}", record.header());
         println!(">{}", record.header());
@@ -92,15 +89,6 @@ fn get_checkpoints<K: Kmer>(graph: &DebruijnGraph<K,()>, path_fasta: &str, path_
         let path = path::get_checkpoints_bfs(&graph, &record).unwrap();
         let duration = start.elapsed();
         eprintln!("  - divided record into {} chunks\n  - time elapsed: {:?}", path.len(), duration);
-
-        // saving them to the file
-        writeln!(file_chunks, ">{}\tlen: {}\tdone in: {:?}", record.header(), path.len(), duration).unwrap();
-        for chunk in path {
-            let start_kmer = chunk.0;
-            let end_kmer = chunk.1;
-            writeln!(file_chunks, "{:?}\t\t{:?}", start_kmer, end_kmer).unwrap();
-        }
-        file_chunks.flush().unwrap();
     }
 }
 

@@ -188,19 +188,27 @@ pub fn get_shortest_path_distance<K: Kmer>(graph: &Graph<K>, start: K, end: K) -
 //                       Find the checkpoints                                       //
 //####################################################################################
 
-/// Iterator over a dna sequence, following the unitigs in the graph.
+/// Iterator over a dna sequence, following the nodes in the graph. It will raise an error if the sequence from kmer_iter can not be found in the graph.
 struct UnitigIterator<'a, K: Kmer, D: Vmer> {
     graph: &'a Graph<K>,
     kmer_iter: KmerIter<'a, K, D>,
     current_node: Option<(usize, Dir)>,
     start_offset: Option<usize>,
     end_offset: Option<usize>,
+
+    current_pos: usize,
+    next_pos: usize,
 }
 
 impl<'a, K: Kmer, D: Vmer> UnitigIterator<'a, K, D> {
     fn new(graph: &'a Graph<K>, sequence: &'a D) -> Self {
         let kmer_iter = sequence.iter_kmers::<K>();
-        UnitigIterator { graph, kmer_iter, current_node:None, start_offset:None, end_offset:None }
+        UnitigIterator { graph, kmer_iter, current_node:None, start_offset:None, end_offset:None, current_pos:0, next_pos:0 }
+    }
+
+    /// get the start offset of the current node in the iterator
+    fn position(&self) -> usize {
+        self.current_pos
     }
 
     /// get the current node in the iterator, without advancing the iterator (except for initialisation)
@@ -213,6 +221,7 @@ impl<'a, K: Kmer, D: Vmer> UnitigIterator<'a, K, D> {
 
     /// get the next node in the iterator, advancing the iterator
     fn next(&mut self) -> Result<Option<(usize, Dir)>, PathwayError<K>> {
+        self.current_pos = self.next_pos;
         // get the next kmer in the kmer iterator
         let kmer = match self.kmer_iter.next() {
             Some(kmer) => kmer,
@@ -221,6 +230,7 @@ impl<'a, K: Kmer, D: Vmer> UnitigIterator<'a, K, D> {
                 return Ok(None)
             },
         };
+        self.next_pos += 1;
 
         // get the corresponding node
         let node: (usize, Dir);
@@ -254,6 +264,7 @@ impl<'a, K: Kmer, D: Vmer> UnitigIterator<'a, K, D> {
                     break
                 },
             };
+            self.next_pos += 1;
             if expected_base != kmer.get(K::k()-1) {
                 return Err(PathwayError::UnitigNotMatching(node_seq.to_owned(), kmer, offset+1));
             }
@@ -269,26 +280,26 @@ fn get_next_checkpoint<K: Kmer, D: Vmer>(graph: &Graph<K>, unitig_iter: &mut Uni
         Some(node) => node,
         None => return Ok(None),
     };
+    let start_position = unitig_iter.position();
 
     let mut current_node = start_node;
     let mut next_node = match unitig_iter.next()? {
         Some(node) => node,
         None => {
-            println!("length 0:\t {:?}\t {:?}", start_node, current_node);
+            println!("1 unitig, starting at {}:\t {:?}\t {:?}", start_position, start_node, current_node);
             return Ok(Some((start_node, current_node)))
         },
     };
-
 
     let mut frontier_set: Vec<(usize, Dir)> = vec![current_node];
     let mut next_set: Vec<(usize, Dir)> = Vec::new();
     let mut visited: AHashSet<(usize, Dir)> = AHashSet::default();
     visited.insert(current_node);
 
-    let mut depth: usize = 0;
+
+    let mut nb_unitigs: usize = 1;
     while !visited.contains(&next_node) {
         // explore the next level of the BFS
-        depth += 1;
         while let Some(node) = frontier_set.pop() {
             let edges = graph.get_node(node.0).edges(node.1.flip());
             for neigh_node in edges.into_iter().map(|(id, dir, _)| (id, dir)) {
@@ -309,8 +320,9 @@ fn get_next_checkpoint<K: Kmer, D: Vmer>(graph: &Graph<K>, unitig_iter: &mut Uni
             Some(node) => node,
             None => break
         };
+        nb_unitigs += 1;
     }
-    println!("length {}:\t {:?}\t {:?}", depth, start_node, current_node);
+    println!("{} unitigs, starting at {}:\t {:?}\t {:?}", nb_unitigs, start_position, start_node, current_node);
     Ok(Some((start_node, current_node)))
 }
 
@@ -371,9 +383,9 @@ mod unit_test {
         let mut path = Vec::new();
         while let Some(node) = unitig_iter.next().unwrap() {
             path.push(node);
+            println!("position: {}, node: {:?}", unitig_iter.position(), graph.get_node(node.0).sequence());
         }
         println!("{:?}", path);
-
     }
 
     #[test]
