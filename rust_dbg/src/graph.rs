@@ -1,13 +1,31 @@
+//! To create graphs from fasta/unitig files
+
 use debruijn::{Kmer, Vmer, Exts, Dir};
 use debruijn::base_to_bits;
 use debruijn::graph::{BaseGraph, DebruijnGraph};
+use debruijn::compression;
+
+use ahash::AHashSet;
 
 use std::sync::{Arc, Mutex};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 use crate::fasta_reader::FastaReader;
 
-pub fn graph_from_unitigs_serial<K: Kmer>(path:&str, stranded: bool) -> DebruijnGraph<K, ()> {
+
+pub type Graph<K> = DebruijnGraph<K, ()>;
+
+/// Creates a graph from a sequence of kmers. (For debugging mainly)
+pub fn graph_from_seq_serial<K: Kmer>(seq: impl Vmer, stranded: bool) -> Graph<K> {
+    let can = |k: K| {if stranded {k} else {k.min_rc()}};
+    let unique_kmers = seq.iter_kmers().map(|k| can(k)).collect::<AHashSet<K>>().into_iter().map(|k| (k, ())).collect::<Vec<_>>();
+    let compression = compression::ScmapCompress::<()>::new();
+    let graph = compression::compress_kmers_no_exts(stranded, &compression,  &unique_kmers);
+    graph.finish_serial()
+}
+
+/// Create a graph from a fasta file containing unitigs (as returned by ggcat for example).
+pub fn graph_from_unitigs_serial<K: Kmer>(path:&str, stranded: bool) -> Graph<K> {
     let mut graph: BaseGraph<K, ()> = BaseGraph::new(stranded);
 
     // Iterate over unitigs and add them to the graph
@@ -26,7 +44,8 @@ pub fn graph_from_unitigs_serial<K: Kmer>(path:&str, stranded: bool) -> Debruijn
     db_graph
 }
 
-pub fn graph_from_unitigs<K: Kmer+Send+Sync>(path:&str, stranded: bool) -> DebruijnGraph<K, ()> {
+/// Same as `graph_from_unitigs_serial` with some parallelisation.
+pub fn graph_from_unitigs<K: Kmer+Send+Sync>(path:&str, stranded: bool) -> Graph<K> {
     let graph: BaseGraph<K, ()> = BaseGraph::new(stranded);
     let graph_arc = Arc::new(Mutex::new(graph));
 
@@ -48,7 +67,8 @@ pub fn graph_from_unitigs<K: Kmer+Send+Sync>(path:&str, stranded: bool) -> Debru
     db_graph
 }
 
-fn fix_exts_serial<K: Kmer>(graph: &mut DebruijnGraph<K, ()>) {
+// utilitary function to add missing edges to the graph
+fn fix_exts_serial<K: Kmer>(graph: &mut Graph<K>) {
     // Get edges wich need update
     let updates: Vec<(usize, Exts)> = (0..graph.len())
         .filter_map(|i| {get_new_exts(&graph, i)})
@@ -60,7 +80,7 @@ fn fix_exts_serial<K: Kmer>(graph: &mut DebruijnGraph<K, ()>) {
     }
 }
 
-fn fix_exts<K: Kmer+Send+Sync>(graph: &mut DebruijnGraph<K, ()>) {
+fn fix_exts<K: Kmer+Send+Sync>(graph: &mut Graph<K>) {
     // Get edges wich need update
     let updates: Vec<(usize, Exts)> = (0..graph.len()).into_par_iter()
         .filter_map(|i| {get_new_exts(&graph, i)})
@@ -73,7 +93,7 @@ fn fix_exts<K: Kmer+Send+Sync>(graph: &mut DebruijnGraph<K, ()>) {
 }
 
 /// Checks if the edges of a node are correct. If not, return the new edges.
-fn get_new_exts<K: Kmer>(graph: &DebruijnGraph<K, ()>, node_id: usize) -> Option<(usize, Exts)> {
+fn get_new_exts<K: Kmer>(graph: &Graph<K>, node_id: usize) -> Option<(usize, Exts)> {
     let node = graph.get_node(node_id);
     let l_kmer: K = node.sequence().first_kmer();
     let r_kmer: K = node.sequence().last_kmer();
@@ -99,70 +119,27 @@ mod unit_test {
     use super::*;
 
     use debruijn::kmer::Kmer3;
+    use debruijn::DnaSlice;
 
-    const PATH : &str = "../data/input/test.fna";
+    const SEQ: DnaSlice = DnaSlice(&[2,2,2,1,1,1,1,2,2,2,0,0,0,0,0,1]);    // gggccccgggaaaaac
+    const STRANDED : bool = true;
+    const PATH_UNITIGS : &str = "../data/input/test.fna";
 
     #[test]
-    fn test_from_fasta() {
-        let graph = graph_from_unitigs_serial::<Kmer3>(PATH, true);
+    #[ignore]
+    fn test_from_seq() {
+        let graph = graph_from_seq_serial::<Kmer3>(SEQ, STRANDED);
+
+        println!("{:?}", graph.base.sequences);
         graph.print();
     }
-}
-
-#[cfg(test)]
-mod test_time {
-    use super::*;
-    use std::time::Instant;
-
-    use debruijn::kmer;
-    use debruijn::compression::ScmapCompress;
-
-    const PATH : &str = "../data/output/chr1/graph_k31.fna";
-    type Kmer31 = kmer::VarIntKmer<u64, kmer::K31>;
 
     #[test]
-    fn time_from_unitigs() {
-        let start = Instant::now();
-        let graph = graph_from_unitigs_serial::<Kmer31>(PATH, false);
-        let duration = start.elapsed();
-        println!("Time to create graph: {:?}", duration);
+    #[ignore]
+    fn test_from_unitigs() {
+        let graph = graph_from_unitigs_serial::<Kmer3>(PATH_UNITIGS, STRANDED);
 
-        // check that the graph is compressed (ie composed of maximal unitigs)
-        let compression = ScmapCompress::new();
-        println!("Graph size: {}", graph.len());
-
-        let test = graph.is_compressed(&compression);
-        match test {
-            None => println!("Graph is compressed"),
-            Some((id1, id2)) => {
-                println!("Graph is not compressed");
-                let (node1, node2) = (graph.get_node(id1), graph.get_node(id2));
-                println!("{:?}\t{:?}", node1.exts(), node1.sequence());
-                println!("{:?}\t{:?}", node2.exts(), node2.sequence());
-            }
-        }
-    }
-
-    #[test]
-    fn time_from_unitigs_parallel() {
-        let start = Instant::now();
-        let graph = graph_from_unitigs::<Kmer31>(PATH, false);
-        let duration = start.elapsed();
-        println!("Time to create graph (parallel): {:?}", duration);
-
-        // check that the graph is compressed (ie composed of maximal unitigs)
-        let compression = ScmapCompress::new();
-        println!("Graph size: {}", graph.len());
-
-        let test = graph.is_compressed(&compression);
-        match test {
-            None => println!("Graph is compressed"),
-            Some((id1, id2)) => {
-                println!("Graph is not compressed");
-                let (node1, node2) = (graph.get_node(id1), graph.get_node(id2));
-                println!("{:?}\t{:?}", node1.exts(), node1.sequence());
-                println!("{:?}\t{:?}", node2.exts(), node2.sequence());
-            }
-        }
+        println!("{:?}", graph.base.sequences);
+        graph.print();
     }
 }

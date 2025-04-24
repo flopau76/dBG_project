@@ -1,4 +1,4 @@
-//! To parse fasta files and extract kmers and their extensions.
+//! To parse fasta files and get the DNA records.
 
 use std::io::{BufReader, BufRead, Result, Seek, SeekFrom};
 use std::fs::File;

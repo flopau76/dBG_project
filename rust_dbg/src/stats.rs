@@ -3,7 +3,7 @@
 use std::io::Write;
 use std::time::Instant;
 
-use crate::Graph;
+use crate::graph::Graph;
 use debruijn::Kmer;
 
 /// Print some stats about the graph

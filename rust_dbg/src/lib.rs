@@ -8,7 +8,3 @@ pub mod path;
 pub mod stats;
 
 // pub use ... for re-exports
-pub use debruijn::{Kmer, Dir};
-use debruijn::graph::DebruijnGraph;
-
-pub type Graph<K> = DebruijnGraph<K, ()>;
