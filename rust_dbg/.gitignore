@@ -1,4 +1,4 @@
 /target
 /tests
 /flamegraph*
-perf.data
+perf.data*
