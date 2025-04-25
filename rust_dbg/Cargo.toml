@@ -7,6 +7,8 @@ edition = "2024"
 rustc-hash = "2.1.1"
 ahash = "0.8.11"
 
+regex = "1.11.1"
+
 debruijn = { git = "https://github.com/flopau76/rust-debruijn.git", branch = "patch-flo" }
 
 serde = "^1"

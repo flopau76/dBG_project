@@ -39,8 +39,8 @@ impl<K: Kmer> std::fmt::Display for PathwayError<K> {
 //                            Unitig iterator                                       //
 //####################################################################################
 
-/// Iterator over a dna sequence, following the nodes in the graph. It will raise an error if the sequence from kmer_iter can not be found in the graph.
-struct UnitigIterator<'a, K: Kmer, D: Vmer> {
+/// Iterator over a dna sequence, following the nodes in the graph. This will raise an error if the sequence from kmer_iter is not present in the graph.
+pub struct NodeIterator<'a, K: Kmer, D: Vmer> {
     graph: &'a Graph<K>,
     kmer_iter: KmerIter<'a, K, D>,
     current_node: Option<(usize, Dir)>,
@@ -51,19 +51,19 @@ struct UnitigIterator<'a, K: Kmer, D: Vmer> {
     next_pos: usize,
 }
 
-impl<'a, K: Kmer, D: Vmer> UnitigIterator<'a, K, D> {
-    fn new(graph: &'a Graph<K>, sequence: &'a D) -> Self {
+impl<'a, K: Kmer, D: Vmer> NodeIterator<'a, K, D> {
+    pub fn new(graph: &'a Graph<K>, sequence: &'a D) -> Self {
         let kmer_iter = sequence.iter_kmers::<K>();
-        UnitigIterator { graph, kmer_iter, current_node:None, start_offset:None, end_offset:None, current_pos:0, next_pos:0 }
+        NodeIterator { graph, kmer_iter, current_node:None, start_offset:None, end_offset:None, current_pos:0, next_pos:0 }
     }
 
     /// get the start offset of the current node in the iterator
-    fn position(&self) -> usize {
+    pub fn position(&self) -> usize {
         self.current_pos
     }
 
     /// get the current node in the iterator, without advancing the iterator (except for initialisation)
-    fn current(&mut self) -> Result<Option<(usize, Dir)>, PathwayError<K>> {
+    pub fn current(&mut self) -> Result<Option<(usize, Dir)>, PathwayError<K>> {
         if self.current_node.is_none() {
             self.current_node = self.next()?;
         }
@@ -71,7 +71,7 @@ impl<'a, K: Kmer, D: Vmer> UnitigIterator<'a, K, D> {
     }
 
     /// get the next node in the iterator, advancing the iterator
-    fn next(&mut self) -> Result<Option<(usize, Dir)>, PathwayError<K>> {
+    pub fn next(&mut self) -> Result<Option<(usize, Dir)>, PathwayError<K>> {
         self.current_pos = self.next_pos;
         // get the next kmer in the kmer iterator
         let kmer = match self.kmer_iter.next() {
@@ -138,6 +138,7 @@ fn search_kmer<K: Kmer>(graph: &Graph<K>, kmer: K, side: Dir) -> Option<(usize, 
 }
 
 // Search a kmer within the nodes, by iterating over all the graph. Returns ((node_id, dir), offset) where offset is counted from the given side.
+// TODO: instead of iterating the graph, advance in the iterator until it matches the end of a node
 fn search_kmer_offset<K: Kmer>(graph: &Graph<K>, kmer: K, side: Dir) -> Option<((usize, Dir), usize)> {
     // search at the given extremity
     if let Some((node_id, dir)) = search_kmer(graph, kmer, side) {
@@ -347,7 +348,7 @@ pub fn get_shortest_path_distance<K: Kmer>(graph: &Graph<K>, start: K, end: K) -
 //####################################################################################
 
 // Performs a BFS to find the next checkpoints in the graph
-fn get_next_checkpoint<K: Kmer, D: Vmer>(graph: &Graph<K>, unitig_iter: &mut UnitigIterator<K,D>) -> Result<Option<((usize, Dir),(usize, Dir))>, PathwayError<K>> {
+fn get_next_checkpoint<K: Kmer, D: Vmer>(graph: &Graph<K>, unitig_iter: &mut NodeIterator<K,D>) -> Result<Option<((usize, Dir),(usize, Dir))>, PathwayError<K>> {
     let start_node = match unitig_iter.current()? {
         Some(node) => node,
         None => return Ok(None),
@@ -383,12 +384,15 @@ fn get_next_checkpoint<K: Kmer, D: Vmer>(graph: &Graph<K>, unitig_iter: &mut Uni
                 if new {
                     next_set.push(neigh_left_kmer);
                 }
+                // second time we find the expected node -> several different paths exists
+                if neigh_left_kmer == next_left_kmer && !new { break; }
             }
         }
+        assert!(visited.contains(&next_left_kmer));
+
         frontier_set = next_set;
         next_set = Vec::new();
 
-        assert!(visited.contains(&next_left_kmer));
 
         // advance the kmer iterator to the next node
         current_node = next_node;
@@ -406,7 +410,7 @@ fn get_next_checkpoint<K: Kmer, D: Vmer>(graph: &Graph<K>, unitig_iter: &mut Uni
 /// Breaks the input haplotype into segments corresponding to shortest paths (nb of nodes) in the graph.
 pub fn get_checkpoints_bfs<K: Kmer>(graph: &Graph<K>, haplo: &DnaRecord) -> Result<Vec<((usize, Dir),(usize, Dir))>, PathwayError<K>> {
     let seq = haplo.dna_string();
-    let mut unitig_iter = UnitigIterator::new(graph, &seq);
+    let mut unitig_iter = NodeIterator::new(graph, &seq);
     let mut checkpoints = Vec::new();
 
     while let Some(node) = get_next_checkpoint(graph, &mut unitig_iter)? {
@@ -420,7 +424,7 @@ pub fn get_checkpoints_bfs<K: Kmer>(graph: &Graph<K>, haplo: &DnaRecord) -> Resu
 mod unit_test {
     use super::*;
 
-    use crate::graph;
+    use crate::graph::Graph;
 
     use debruijn::kmer::Kmer3;
     use debruijn::{DnaSlice, dna_string::DnaString, Vmer, bits_to_ascii};
@@ -433,7 +437,7 @@ mod unit_test {
     #[test]
     fn test_shortest_path() {
         let (start, end) = SEQ.both_term_kmer::<Kmer3>();
-        let graph = graph::graph_from_seq_serial(SEQ, STRANDED);
+        let graph = Graph::from_seq_serial(SEQ, STRANDED);
         let path_bfs = get_shortest_path_nodes(&graph, start, end).unwrap();
         let path_djk = get_shortest_path_distance(&graph, start, end).unwrap();
 
@@ -444,8 +448,8 @@ mod unit_test {
 
     #[test]
     fn test_unitig_iterator() {
-        let graph = graph::graph_from_seq_serial::<Kmer3>(SEQ, STRANDED);
-        let mut unitig_iter = UnitigIterator::new(&graph, &SEQ);
+        let graph = Graph::<Kmer3>::from_seq_serial(SEQ, STRANDED);
+        let mut unitig_iter = NodeIterator::new(&graph, &SEQ);
 
         let mut path = Vec::new();
         while let Some(node) = unitig_iter.next().unwrap() {
@@ -460,7 +464,7 @@ mod unit_test {
     #[test]
     #[ignore]
     fn test_get_checkpoints() {
-        let graph = graph::graph_from_seq_serial::<Kmer3>(SEQ, STRANDED);
+        let graph = Graph::<Kmer3>::from_seq_serial(SEQ, STRANDED);
         let haplo = DnaRecord::new(String::from("test"), SEQ.iter().map(|x| bits_to_ascii(x)).collect::<Vec<u8>>());
         let _checkpoints = get_checkpoints_bfs(&graph, &haplo).unwrap();        
     }
