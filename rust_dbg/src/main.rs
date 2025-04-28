@@ -150,7 +150,7 @@ pub fn reconstruct_fasta<K: Kmer>(graph: &Graph<K>, checkpoints: Vec<(String, Ve
         println!(">{}", header);
         let mut seq = DnaString::new();
         for (start_node, end_node) in current_checkpoints {
-            let path = path::get_shortest_path_bfs(graph, start_node, end_node).unwrap();
+            let path = path::get_shortest_path_double_bfs(graph, start_node, end_node).unwrap();
             seq = graph.sequence_of_path(path.iter());
             println!("{}", seq.prefix(seq.len()-K::k()+1));
         }
@@ -168,7 +168,7 @@ pub fn stats_checkpoints<K: Kmer>(graph: &Graph<K>, checkpoints: Vec<(String, Ve
         for (start_node, end_node) in current_checkpoints {
 
             // get the path between the start and end nodes
-            let path = path::get_shortest_path_bfs(graph, start_node, end_node).unwrap();
+            let path = path::get_shortest_path_double_bfs(graph, start_node, end_node).unwrap();
 
             // walk the path to get the number of breakpoints
             let mut breakpoints_l: usize = 0;

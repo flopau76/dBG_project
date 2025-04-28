@@ -6,9 +6,7 @@ use debruijn::{Dir, Kmer, Mer, Vmer, KmerIter};
 use debruijn::dna_string::DnaString;
 
 use ahash::{AHashMap, AHashSet};
-use std::collections::{VecDeque, BinaryHeap};
 use std::collections::hash_map::Entry;
-use std::cmp::Reverse;
 use std::error::Error;
 
 //####################################################################################
@@ -195,121 +193,89 @@ fn get_right_extensions<K: Kmer>(graph: &Graph<K>, node: (usize, Dir)) -> Vec<K>
 //                       Find the shortest path                                     //
 //####################################################################################
 
-/// Search the shortest path (in number of nodes) in a compacted De Bruijn Graph using the Breadth-First Search algorithm.  
-/// Note: when several paths exist, the first one found is returned.
-pub fn get_shortest_path_bfs<K: Kmer>(graph: &Graph<K>, start_node: (usize, Dir), end_node: (usize, Dir)) -> Result<Vec<(usize, Dir)>, PathwayError<K>> {
-
-    // edge case: start and end are the same
-    if start_node == end_node {
-        return Ok(vec![(start_node)]);
-    }
-
-    // mark the start kmer as visited and add it to the queue
-    let start_left_kmer = get_left_kmer(graph, start_node);
-    let end_left_kmer = get_left_kmer(graph, end_node);
-    let mut parents= AHashMap::default();
-    let mut queue = VecDeque::new();
-    parents.insert(start_left_kmer, start_node);
-    queue.push_back(start_left_kmer);
-
-    // perform BFS
-    'kmer: while let Some(current_left_kmer) = queue.pop_front() {
-        let current_node = search_kmer(graph, current_left_kmer, Dir::Left)
-            .ok_or(PathwayError::KmerNotFound(current_left_kmer))?;
-        for neigh_left_kmer in get_right_extensions(graph, current_node) {
-            let entry = parents.entry(neigh_left_kmer);
+// Advances the bfs by one depth and returns the new frontier set. Direction indicates in wich direction the strand is elongated.
+fn advance_bfs<K: Kmer>(graph: &Graph<K>, queue: &mut Vec<(usize, Dir)>, parents: &mut AHashMap<(usize, Dir), (usize, Dir)>, direction:Dir) -> Vec<(usize, Dir)> {
+    let mut next_queue = Vec::new();
+    while let Some(current_node) = queue.pop() {
+        for (neigh_id, neigh_dir, _) in graph.get_node(current_node.0).edges(current_node.1.cond_flip(direction==Dir::Left)) {
+            let entry = parents.entry((neigh_id, neigh_dir.cond_flip(direction!=Dir::Left)));
             if let Entry::Vacant(e) = entry {
                 e.insert(current_node);
-                queue.push_back(neigh_left_kmer);
-            }
-            if neigh_left_kmer == end_left_kmer {
-                break 'kmer;
+                next_queue.push((neigh_id, neigh_dir.cond_flip(direction!=Dir::Left)));
             }
         }
     }
-
-    if queue.is_empty() {
-        return Err(PathwayError::NoPathExists);
-    }
-
-    // reconstruct the path by backtracking the visited nodes
-    let mut left_kmer = end_left_kmer;
-    let mut path = Vec::new();
-    path.push(end_node);
-
-    while left_kmer != start_left_kmer {
-        let node = *parents.get(&left_kmer).expect("Node not found in parents map");
-        left_kmer = get_left_kmer(graph, node);
-        path.push(node);
-    }
-    path.reverse();
-    Ok(path)
-
+    next_queue
 }
 
-/// Search the shortest path in a compacted De Bruijn Graph. Contrarily to [get_shortest_path_bfs], this algorithm works with a custom distance function `f_dist(x)`,
-/// which indicates how much a path is elongated when adding a node of length `x`.  
+/// Search the shortest path (in number of nodes) in a compacted De Bruijn Graph using a double ended breadth-first search.  
 /// Note: when several paths exist, the first one found is returned.
-pub fn get_shortest_path_djk<K: Kmer, D>(graph: &Graph<K>, start_node: (usize, Dir), end_node: (usize, Dir), f_dist: D) -> Result<Vec<(usize, Dir)>, PathwayError<K>>
-where D: Fn(usize) -> usize
-{
+pub fn get_shortest_path_double_bfs<K: Kmer>(graph: &Graph<K>, start_node: (usize, Dir), end_node: (usize, Dir)) -> Result<Vec<(usize, Dir)>, PathwayError<K>> {
+
     // edge case: start and end are the same
     if start_node == end_node {
         return Ok(vec![(start_node)]);
     }
 
-    // mark the start kmer as visited and add it to the queue
-    let start_left_kmer = get_left_kmer(graph, start_node);
-    let end_left_kmer = get_left_kmer(graph, end_node);
-    let mut parents= AHashMap::default();
-    let mut queue = BinaryHeap::new();
-    parents.insert(start_left_kmer, (0, start_node));
-    queue.push(Reverse((0, start_left_kmer)));
+    // initialize the two queues
+    let mut parents_left= AHashMap::default();
+    let mut parents_right= AHashMap::default();
+    let mut queue_left = Vec::new();
+    let mut queue_right = Vec::new();
+    parents_left.insert(start_node, start_node);
+    parents_right.insert(end_node, end_node);
+    queue_left.push(start_node);
+    queue_right.push(end_node);
 
     // perform BFS
-    while let Some(Reverse((distance, current_left_kmer))) = queue.pop() {
-        if current_left_kmer == end_left_kmer {
-            queue.clear();
-            queue.push(Reverse((distance, current_left_kmer)));
-            break;
-        }
-        let current_node = search_kmer(graph, current_left_kmer, Dir::Left)
-            .ok_or(PathwayError::KmerNotFound(current_left_kmer))?;
-        let current_node_len = graph.get_node(current_node.0).len();
-        let neigh_dist = distance + f_dist(current_node_len);
-        for neigh_left_kmer in get_right_extensions(graph, current_node) {
-            let entry = parents.entry(neigh_left_kmer);
-            match entry {
-                Entry::Vacant(e) => {
-                    e.insert((neigh_dist, current_node));
-                    queue.push(Reverse((neigh_dist, neigh_left_kmer)));
+    let mut middle_node = None;
+    'kmer: while !queue_left.is_empty() && !queue_right.is_empty() {
+        if queue_left.len() < queue_right.len() {
+            // elongate from the left
+            queue_left = advance_bfs(graph, &mut queue_left, &mut parents_left, Dir::Left);
+            // check if the two queues have met
+            for node in &queue_left {
+                if parents_right.contains_key(node) {
+                    middle_node = Some(*node);
+                    break 'kmer;
                 }
-                Entry::Occupied(mut e) => {
-                    let (dist, _) = *e.get();
-                    if dist > neigh_dist {
-                        e.insert((neigh_dist, current_node));
-                        queue.push(Reverse((neigh_dist, neigh_left_kmer)));
-                    }
+            }
+        } else {
+            // elongate from the right
+            queue_right = advance_bfs(graph, &mut queue_right, &mut parents_right, Dir::Right);
+            // check if the two queues have met
+            for node in &queue_right {
+                if parents_left.contains_key(node) {
+                    middle_node = Some(*node);
+                    break 'kmer;
                 }
             }
         }
     }
 
-    if queue.is_empty() {
+    if middle_node.is_none() {
         return Err(PathwayError::NoPathExists);
     }
+    let middle_node = middle_node.unwrap();
 
-    // reconstruct the path by backtracking the visited nodes
-    let mut left_kmer = end_left_kmer;
+    // traceback left side by baktracking from the middle node
+    let mut node = middle_node;
     let mut path = Vec::new();
-    path.push(end_node);
+    path.push(node);
 
-    while left_kmer != start_left_kmer {
-        let (_, node) = *parents.get(&left_kmer).expect("Node not found in parents map");
-        left_kmer = get_left_kmer(graph, node);
+    while node != start_node {
+        node = *parents_left.get(&node).expect("Node not found in parents map");
         path.push(node);
     }
     path.reverse();
+
+    // traceback right side by baktracking from the middle node
+    node = middle_node;
+    while node != end_node {
+        node = *parents_right.get(&node).expect("Node not found in parents map");
+        path.push(node);
+    }
+
     Ok(path)
 }
 
@@ -319,19 +285,7 @@ pub fn get_shortest_path_nodes<K: Kmer>(graph: &Graph<K>, start: K, end: K) -> R
         .ok_or(PathwayError::KmerNotFound(start))?;
     let (end, end_offset) = search_kmer_offset(graph, end, Dir::Right)
         .ok_or(PathwayError::KmerNotFound(end))?;
-    let path = get_shortest_path_bfs::<K>(graph, start, end)?;
-    let path = graph.sequence_of_path(path.iter());
-    let path = path.slice(start_offset, path.len()-end_offset);
-    Ok(path.to_owned())
-}
-
-/// Wrapper for finding the shortest path in terms of nucleotides between two kmers.
-pub fn get_shortest_path_distance<K: Kmer>(graph: &Graph<K>, start: K, end: K) -> Result<DnaString, PathwayError<K>> {
-    let (start, start_offset) = search_kmer_offset(graph, start, Dir::Left)
-        .ok_or(PathwayError::KmerNotFound(start))?;
-    let (end, end_offset) = search_kmer_offset(graph, end, Dir::Right)
-        .ok_or(PathwayError::KmerNotFound(end))?;
-    let path = get_shortest_path_djk(graph, start, end, |node_len| node_len)?;
+    let path = get_shortest_path_double_bfs::<K>(graph, start, end)?;
     let path = graph.sequence_of_path(path.iter());
     let path = path.slice(start_offset, path.len()-end_offset);
     Ok(path.to_owned())
@@ -423,7 +377,7 @@ mod unit_test {
     use debruijn::kmer::Kmer3;
     use debruijn::{DnaSlice, dna_string::DnaString, Vmer, bits_to_ascii};
 
-    const STRANDED : bool = true;
+    const STRANDED : bool = false;
     const SEQ: DnaSlice = DnaSlice(&[2,2,2,1,1,1,1,2,2,2,0,0,0,0,0,1]);    // gggccccgggaaaaac
     const SHORTEST: DnaSlice = DnaSlice(&[2,2,2,0,0,1]); // gggaac
     // TODO: example with different result if stranded or not
@@ -433,11 +387,9 @@ mod unit_test {
         let (start, end) = SEQ.both_term_kmer::<Kmer3>();
         let graph = Graph::from_seq_serial(SEQ, STRANDED);
         let path_bfs = get_shortest_path_nodes(&graph, start, end).unwrap();
-        let path_djk = get_shortest_path_distance(&graph, start, end).unwrap();
 
         let shortest = DnaString::from_bytes(SHORTEST.0);
         assert!(path_bfs == shortest);
-        assert!(path_djk == shortest);
     }
 
     #[test]

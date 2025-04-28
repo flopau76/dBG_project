@@ -14,7 +14,7 @@ Ajouter des infos aux graphes de Bruijn (dBG) (colorés ou pas ?) pour permettre
 **À faire (par complexité ~ croissante):**
 - [X] résumé lecture d'articles: ce que j'en retire
 - [-] pistes à explorer: ajout d'infos au dBG, mètriques pour estimer à quel point on reconstruit les haplotypes d'origines
-- [X] installation d'outils existants (pggb, Minigraph Cactus, ggcat) et test sur des exemples simples (génome de moustiuque/ un seul chromosome)
+- [X] installation d'outils existants (pggb, Minigraph Cactus, ggcat) et test sur des exemples simples (génome de moustique/ un seul chromosome)
 - [ ] prise en main nextflow
 
 __________________
@@ -174,7 +174,7 @@ Pas grand chose. Compléxité mémoire mieux que l'encodage des couleurs mais ef
 
 ______________
 TODO:
-- efficacité: get_kmer_offset lorsqu'on initialise un NodeIterator, double ended BFS
+- efficacité: get_kmer_offset lorsqu'on initialise un NodeIterator, double ended BFS -> lors de la reconstruction d'un haplotype, plusieurs plus courts chemins avec start_i+1=end_i -> réutiliser la partie déjà calculée -> pas possible: on part du même noeud mais pas dans la même direction.
 - stats: coût encodage + comparaison couleurs
 
 
