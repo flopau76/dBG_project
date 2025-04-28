@@ -28,6 +28,7 @@ pub fn stats_graph<K: Kmer>(graph: &Graph<K>) {
 }
 
 /// Count the number of breakpoints in a graph, for a given haplotype
+#[deprecated]
 pub fn stats_haplo<K: Kmer>(graph: &Graph<K>, haplo: FastaReader) {
     eprint!("Iterating fasta file... ");
     std::io::stderr().flush().unwrap();

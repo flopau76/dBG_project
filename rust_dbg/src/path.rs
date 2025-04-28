@@ -71,6 +71,7 @@ impl<'a, K: Kmer, D: Vmer> NodeIterator<'a, K, D> {
     }
 
     /// get the next node in the iterator, advancing the iterator
+    // TODO: replace search_kmer_offset by a more efficient search (better looking 30 times in a boomphf than iterating the whole graph)
     pub fn next(&mut self) -> Result<Option<(usize, Dir)>, PathwayError<K>> {
         self.current_pos = self.next_pos;
         // get the next kmer in the kmer iterator
@@ -196,15 +197,11 @@ fn get_right_extensions<K: Kmer>(graph: &Graph<K>, node: (usize, Dir)) -> Vec<K>
 
 /// Search the shortest path (in number of nodes) in a compacted De Bruijn Graph using the Breadth-First Search algorithm.  
 /// Note: when several paths exist, the first one found is returned.
-pub fn get_shortest_path_bfs<K: Kmer>(graph: &Graph<K>, start_node: (usize, Dir), end_node: (usize, Dir)) -> Result<DnaString, PathwayError<K>> {
+pub fn get_shortest_path_bfs<K: Kmer>(graph: &Graph<K>, start_node: (usize, Dir), end_node: (usize, Dir)) -> Result<Vec<(usize, Dir)>, PathwayError<K>> {
 
     // edge case: start and end are the same
     if start_node == end_node {
-        let mut seq = graph.get_node(start_node.0).sequence();
-        if start_node.1 == Dir::Left {
-            seq = seq.rc();
-        }
-        return Ok(seq.to_owned());
+        return Ok(vec![(start_node)]);
     }
 
     // mark the start kmer as visited and add it to the queue
@@ -246,23 +243,19 @@ pub fn get_shortest_path_bfs<K: Kmer>(graph: &Graph<K>, start_node: (usize, Dir)
         path.push(node);
     }
     path.reverse();
+    Ok(path)
 
-    Ok(graph.sequence_of_path(path.iter()))
 }
 
 /// Search the shortest path in a compacted De Bruijn Graph. Contrarily to [get_shortest_path_bfs], this algorithm works with a custom distance function `f_dist(x)`,
 /// which indicates how much a path is elongated when adding a node of length `x`.  
 /// Note: when several paths exist, the first one found is returned.
-pub fn get_shortest_path_djk<K: Kmer, D>(graph: &Graph<K>, start_node: (usize, Dir), end_node: (usize, Dir), f_dist: D) -> Result<DnaString, PathwayError<K>>
+pub fn get_shortest_path_djk<K: Kmer, D>(graph: &Graph<K>, start_node: (usize, Dir), end_node: (usize, Dir), f_dist: D) -> Result<Vec<(usize, Dir)>, PathwayError<K>>
 where D: Fn(usize) -> usize
 {
     // edge case: start and end are the same
     if start_node == end_node {
-        let seq = graph.get_node(start_node.0).sequence();
-        if start_node.1 == Dir::Left {
-            seq.rc();
-        }
-        return Ok(seq.to_owned());
+        return Ok(vec![(start_node)]);
     }
 
     // mark the start kmer as visited and add it to the queue
@@ -317,8 +310,7 @@ where D: Fn(usize) -> usize
         path.push(node);
     }
     path.reverse();
-
-    Ok(graph.sequence_of_path(path.iter()))
+    Ok(path)
 }
 
 /// Wrapper for finding the shortest path in terms of nodes between two kmers.
@@ -328,6 +320,7 @@ pub fn get_shortest_path_nodes<K: Kmer>(graph: &Graph<K>, start: K, end: K) -> R
     let (end, end_offset) = search_kmer_offset(graph, end, Dir::Right)
         .ok_or(PathwayError::KmerNotFound(end))?;
     let path = get_shortest_path_bfs::<K>(graph, start, end)?;
+    let path = graph.sequence_of_path(path.iter());
     let path = path.slice(start_offset, path.len()-end_offset);
     Ok(path.to_owned())
 }
@@ -339,6 +332,7 @@ pub fn get_shortest_path_distance<K: Kmer>(graph: &Graph<K>, start: K, end: K) -
     let (end, end_offset) = search_kmer_offset(graph, end, Dir::Right)
         .ok_or(PathwayError::KmerNotFound(end))?;
     let path = get_shortest_path_djk(graph, start, end, |node_len| node_len)?;
+    let path = graph.sequence_of_path(path.iter());
     let path = path.slice(start_offset, path.len()-end_offset);
     Ok(path.to_owned())
 }
@@ -360,7 +354,7 @@ fn get_next_checkpoint<K: Kmer, D: Vmer>(graph: &Graph<K>, unitig_iter: &mut Nod
     let mut next_node = match unitig_iter.next()? {
         Some(node) => node,
         None => {
-            println!("1 unitig, starting at {}:\t {:?}\t {:?}", start_position, start_node, start_node);
+            println!("1 unitigs, starting at {}:\t {:?}\t {:?}", start_position, start_node, start_node);
             return Ok(Some((start_node, start_node)))
         },
     };

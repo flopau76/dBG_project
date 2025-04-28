@@ -125,8 +125,7 @@ __________________
 
 __________________
 ## Réunion du 08/04
-
-**TODO:**
+Objectifs:
 - court terme: git fonctionnel avec readme explicatif
 - moyen terme: decoupage haplotype en "plus court chemin par morceaux"
 
@@ -165,6 +164,18 @@ Prochaine étape: fouille de donnée.
 - affichage le long du chromosome
 - caractériser les bouts de chemins répétés
 Pour plus tard: mixer les méthodes. Que se passe t'il en ajoutant des  haplotypes ? Gain d'encodage en mémorisant un "chemin de référence" et en stockant les variations par rapport à ce chemin.
+
+_________
+## Réunion du 28/04
+Pas grand chose. Compléxité mémoire mieux que l'encodage des couleurs mais efficacité temporelle à revoir
+
+
+
+
+______________
+TODO:
+- efficacité: get_kmer_offset lorsqu'on initialise un NodeIterator, double ended BFS
+- stats: coût encodage + comparaison couleurs
 
 
 ## Comparaison crates rust
