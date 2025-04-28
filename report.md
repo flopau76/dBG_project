@@ -167,14 +167,13 @@ Pour plus tard: mixer les méthodes. Que se passe t'il en ajoutant des  haplotyp
 
 _________
 ## Réunion du 28/04
-Pas grand chose. Compléxité mémoire mieux que l'encodage des couleurs mais efficacité temporelle à revoir
-
-
+Pas grand chose. Complexité mémoire mieux que l'encodage des couleurs mais efficacité temporelle à revoir
 
 
 ______________
 TODO:
-- efficacité: get_kmer_offset lorsqu'on initialise un NodeIterator, double ended BFS -> lors de la reconstruction d'un haplotype, plusieurs plus courts chemins avec start_i+1=end_i -> réutiliser la partie déjà calculée -> pas possible: on part du même noeud mais pas dans la même direction.
+- efficacité: de manière générale, get_checkpoinyts est bcp trop lent. remplacer get_kmer_offset lorsqu'on initialise un NodeIterator
+- correction: pourquoi la reconstruction n'est pas parfaite ?
 - stats: coût encodage + comparaison couleurs
 
 

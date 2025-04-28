@@ -34,8 +34,8 @@ rm -rf input/GCF_035046485.1
 
 seq 1 3 | while read i; do
     mkdir -p input/chr$i
-    seqkit faidx input/AalbF3.fna chr$i -r -o input/chr$i/AalbF3.fna
-    seqkit faidx input/AalbF5.fna chr$i -r -o input/chr$i/AalbF5.fna
+    seqkit grep input/AalbF3.fna chr$i -r -o input/chr$i/AalbF3.fna
+    seqkit grep input/AalbF5.fna chr$i -r -o input/chr$i/AalbF5.fna
 done
 
 #_______________________________________________________________________________
@@ -59,3 +59,14 @@ done
 # args: -k: kmer size
 #       -s: minimal kmer multiplicity for filtering
 #       -j: number of threads
+
+#_______________________________________________________________________________
+# Draft: align reconstruction with input
+#_______________________________________________________________________________
+mkdir test_align
+seq 1 10 | while read i; do
+    # seqkit grep -p "AalbF5#1#chr1_$i" output/chr1/reconstruct_AalbF5_in_1.fna | seqkit replace -w 0 -p $ -r "#reconstruct" -o test_align/AalbF5#1#chr1_$i.fna
+    # seqkit grep -p "AalbF5#1#chr1_$i" input/chr1/AalbF5_splitN.fna | seqkit replace -w 0 -p $ -r "#input" >> test_align/AalbF5#1#chr1_$i.fna
+    clustalo -i test_align/AalbF5#1#chr1_$i.fna -o test_align/AalbF5#1#chr1_$i.aln --force
+    seqkit -w 0 seq test_align/AalbF5#1#chr1_$i.aln -o test_align/AalbF5#1#chr1_$i.aln2
+done

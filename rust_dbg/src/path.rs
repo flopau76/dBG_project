@@ -69,7 +69,6 @@ impl<'a, K: Kmer, D: Vmer> NodeIterator<'a, K, D> {
     }
 
     /// get the next node in the iterator, advancing the iterator
-    // TODO: replace search_kmer_offset by a more efficient search (better looking 30 times in a boomphf than iterating the whole graph)
     pub fn next(&mut self) -> Result<Option<(usize, Dir)>, PathwayError<K>> {
         self.current_pos = self.next_pos;
         // get the next kmer in the kmer iterator
@@ -86,6 +85,7 @@ impl<'a, K: Kmer, D: Vmer> NodeIterator<'a, K, D> {
         let node: (usize, Dir);
         let offset: usize;
         // if it is the first kmer of the sequence, it may have an offset
+        // TODO: search_kmer_offset is to long. Instead, better advance in the kmer iterator until we find the kmer in the graph
         if self.start_offset.is_none() {
             (node, offset) = search_kmer_offset(self.graph, kmer, Dir::Left)
                 .ok_or(PathwayError::KmerNotFound(kmer))?;
@@ -137,7 +137,6 @@ fn search_kmer<K: Kmer>(graph: &Graph<K>, kmer: K, side: Dir) -> Option<(usize, 
 }
 
 // Search a kmer within the nodes, by iterating over all the graph. Returns ((node_id, dir), offset) where offset is counted from the given side.
-// TODO: instead of iterating the graph, advance in the iterator until it matches the end of a node
 fn search_kmer_offset<K: Kmer>(graph: &Graph<K>, kmer: K, side: Dir) -> Option<((usize, Dir), usize)> {
     // search at the given extremity
     if let Some((node_id, dir)) = search_kmer(graph, kmer, side) {
@@ -380,7 +379,7 @@ mod unit_test {
     const STRANDED : bool = false;
     const SEQ: DnaSlice = DnaSlice(&[2,2,2,1,1,1,1,2,2,2,0,0,0,0,0,1]);    // gggccccgggaaaaac
     const SHORTEST: DnaSlice = DnaSlice(&[2,2,2,0,0,1]); // gggaac
-    // TODO: example with different result if stranded or not
+    // TODO: example with different result if stranded or not + example with different paths of the same length
 
     #[test]
     fn test_shortest_path() {

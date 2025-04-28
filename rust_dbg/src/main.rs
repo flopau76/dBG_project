@@ -18,8 +18,7 @@ fn main() {
     let path_graph = "../data/output/chr1/AalbF5_k31.fna";
     let path_bin = "../data/output/chr1/AalbF5_k31.bin";
     let path_fasta = "../data/input/chr1/AalbF5_splitN.fna";
-    let path_checkpoints = "../data/output/chr1/checkpoints_AalbF5_in_1.fna";
-    let path_reconstruct = "../data/output/chr1/reconstruct_nodes.AalbF5.fna";
+    let path_checkpoints = "../data/output/chr1/checkpoints_AalbF5_in_2.fna";
 
     // params used for kmer construction by ggcat
     let stranded = false;
@@ -30,10 +29,12 @@ fn main() {
     let graph = load_graph::<Kmer31>(path_bin);
 
     // make_checkpoints(&graph, path_fasta);
-    let checkpoints = load_checkpoints(path_checkpoints);
-    stats_checkpoints::<Kmer31>(&graph, checkpoints);
+    // let checkpoints = load_checkpoints(path_checkpoints);
+    // stats_checkpoints::<Kmer31>(&graph, checkpoints);
+    // reconstruct_fasta(&graph, checkpoints);
 
-    // reconstruct_fasta(&graph, path_checkpoints, path_reconstruct);
+    let haplo = FastaReader::new(path_fasta).unwrap();
+    rust_dbg::stats::stats_haplo(&graph, haplo);
 
 }
 
@@ -134,6 +135,10 @@ pub fn load_checkpoints(path_checkpoints: &str) -> Vec<(String, Vec<((usize, Dir
             (start_id, start_dir),
             (end_id, end_dir),
         ));
+    }
+
+    if !current_checkpoints.is_empty() {
+        result.push((current_header, current_checkpoints));
     }
 
     let duration = start.elapsed();
