@@ -2,7 +2,7 @@
 use crate::fasta_reader::DnaRecord;
 use crate::graph::Graph;
 
-use debruijn::{Dir, Kmer, Mer, Vmer, KmerIter};
+use debruijn::{Dir, Kmer, KmerIter, Mer, Vmer};
 use debruijn::dna_string::DnaString;
 
 use ahash::{AHashMap, AHashSet};
@@ -18,7 +18,6 @@ use std::error::Error;
 pub enum PathwayError<K> {
     NoPathExists,
     KmerNotFound(K),
-    WrongExtension(usize),
     UnitigNotMatching(DnaString, K, usize),
 }
 impl<K: Kmer> Error for PathwayError<K> {}
@@ -27,7 +26,6 @@ impl<K: Kmer> std::fmt::Display for PathwayError<K> {
         match self {
             PathwayError::NoPathExists => write!(f, "No path found between the given k-mers"),
             PathwayError::KmerNotFound(kmer) => write!(f, "Kmer not found: {:?}", kmer),
-            PathwayError::WrongExtension(id) => write!(f, "Node {id} has extensions not present in graph"),
             PathwayError::UnitigNotMatching(seq, kmer, i) => write!(f, "Expected kmer {:?} at position {} in unitig {}", kmer, i, seq),
         }
     }
@@ -42,70 +40,134 @@ pub struct NodeIterator<'a, K: Kmer, D: Vmer> {
     graph: &'a Graph<K>,
     kmer_iter: KmerIter<'a, K, D>,
     current_node: Option<(usize, Dir)>,
-    start_offset: Option<usize>,
-    end_offset: Option<usize>,
-
-    current_pos: usize,
-    next_pos: usize,
+    current_start: usize,
+    current_end: usize,
+    pub start_offset: usize,
+    pub end_offset: Option<usize>,
 }
 
 impl<'a, K: Kmer, D: Vmer> NodeIterator<'a, K, D> {
-    pub fn new(graph: &'a Graph<K>, sequence: &'a D) -> Self {
+    pub fn new(graph: &'a Graph<K>, sequence: &'a D) -> Result<Self, PathwayError<K>> {
         let kmer_iter = sequence.iter_kmers::<K>();
-        NodeIterator { graph, kmer_iter, current_node:None, start_offset:None, end_offset:None, current_pos:0, next_pos:0 }
-    }
+        let mut node_iter = Self{
+            graph,
+            kmer_iter,
+            current_node: None,
+            current_start: 0,
+            current_end: 1,
+            start_offset: 0,
+            end_offset: None,
+        };
 
-    /// get the start offset of the current node in the iterator
-    pub fn position(&self) -> usize {
-        self.current_pos
-    }
+        // initialise the iterator by looking for the first kmer
+        let mut kmer = node_iter.kmer_iter.next().expect("kmer iter is empty");
+        let node = search_kmer(graph, kmer, Dir::Left);
 
-    /// get the current node in the iterator, without advancing the iterator (except for initialisation)
-    pub fn current(&mut self) -> Result<Option<(usize, Dir)>, PathwayError<K>> {
-        if self.current_node.is_none() {
-            self.current_node = self.next()?;
+        // first kmer corresponds to the start of a node
+        if node.is_some() {
+            node_iter.current_node = node;
+            // get the sequence of this node
+            let node = node.unwrap();
+            let expected_seq = match node.1 {
+                Dir::Left => graph.get_node(node.0).sequence(),
+                Dir::Right => graph.get_node(node.0).sequence().rc(),
+            };
+            // advance the kmer iterator to the end of this node and verify that both coincide
+            for (idx, expected_base) in expected_seq.slice(K::k(), expected_seq.len()).iter().enumerate() {
+                let kmer = match node_iter.kmer_iter.next(){
+                    Some(kmer) => kmer,
+                    None => {
+                        node_iter.end_offset = Some(expected_seq.len()-idx);
+                        break
+                    },
+                };
+                node_iter.current_end += 1;
+                if expected_base != kmer.get(K::k()-1) {
+                    return Err(PathwayError::UnitigNotMatching(expected_seq.to_owned(), kmer, 1));
+                }
+            }
         }
-        return Ok(self.current_node)
+        // first kmer does not correspond to the start of a node
+        else {
+            let mut node = search_kmer(graph, kmer, Dir::Right);
+            let mut kmer_seq = DnaString::new();
+            // advance in kmer_iter until we find the end of a node
+            while node.is_none() {
+                kmer_seq.push(kmer.get(0));
+                node_iter.current_end += 1;
+                kmer = match node_iter.kmer_iter.next() {
+                    Some(kmer) => kmer,
+                    None => {
+                        // the sequence does not even correspond to a full node => we have to iterate the whole graph to find it
+                        let (node, start_offset) = search_kmer_offset(graph, kmer, Dir::Left).ok_or(PathwayError::KmerNotFound(kmer))?;
+                        node_iter.current_node = Some(node);
+                        node_iter.start_offset = start_offset;
+                        node_iter.end_offset = Some(graph.get_node(node.0).len()-start_offset-node_iter.current_end);   // TODO: check value (edge case anyway)
+                        return Ok(node_iter)
+                    },
+                };
+                node = search_kmer(graph, kmer, Dir::Right);
+            }
+            node_iter.current_node = node;
+            let node = node.unwrap();
+            // verify that the skipped kmers coincide with the beginning of the node
+            let expected_seq = match node.1 {
+                Dir::Left => graph.get_node(node.0).sequence(),
+                Dir::Right => graph.get_node(node.0).sequence().rc(),
+            };
+            node_iter.start_offset = expected_seq.len()-K::k()+1-node_iter.current_end;
+            let expected_seq = expected_seq.slice(node_iter.start_offset, expected_seq.len()-K::k()).to_owned();
+            if expected_seq != kmer_seq {
+                return Err(PathwayError::UnitigNotMatching(expected_seq, kmer, 0));
+            }
+        }
+        Ok(node_iter)
+    }
+
+    /// get the position of the current node in the kmer iterator
+    pub fn start_position(&self) -> usize {
+        self.current_start
+    }
+    pub fn end_position(&self) -> usize {
+        self.current_end
+    }
+
+    /// get the next node in the iterator, without advancing
+    pub fn peek(&self) -> Option<(usize, Dir)> {
+        self.current_node
     }
 
     /// get the next node in the iterator, advancing the iterator
     pub fn next(&mut self) -> Result<Option<(usize, Dir)>, PathwayError<K>> {
-        self.current_pos = self.next_pos;
-        // get the next kmer in the kmer iterator
+        let current = self.peek();
+        self.advance()?;
+        Ok(current)
+    }
+
+    /// advance the iterator
+    pub fn advance(&mut self) -> Result<(), PathwayError<K>> {
+        // get the next kmer in the iterator, if any
         let kmer = match self.kmer_iter.next() {
             Some(kmer) => kmer,
             None => {
                 self.current_node = None;
-                return Ok(None)
+                return Ok(())
             },
         };
-        self.next_pos += 1;
-
-        // get the corresponding node
-        let node: (usize, Dir);
-        let offset: usize;
-        // if it is the first kmer of the sequence, it may have an offset
-        // TODO: search_kmer_offset is to long. Instead, better advance in the kmer iterator until we find the kmer in the graph
-        if self.start_offset.is_none() {
-            (node, offset) = search_kmer_offset(self.graph, kmer, Dir::Left)
-                .ok_or(PathwayError::KmerNotFound(kmer))?;
-            self.start_offset = Some(offset);
-        }
-        // otherwise the kmer must correspond to the beginning of a unitig
-        else {
-            node = search_kmer(self.graph, kmer, Dir::Left)
-                .ok_or(PathwayError::KmerNotFound(kmer))?;
-            offset = 0;
-        }
-
+        // look for the kmer at the beginning of the unitigs
+        let node = search_kmer(self.graph, kmer, Dir::Left).ok_or(PathwayError::KmerNotFound(kmer))?;   // TODO: change message: the kmer might exist but not at the start of a node, as expected
+        self.current_node = Some(node);
+        self.current_start = self.current_end;
+        self.current_end += 1;
         // get the sequence of this node
-        let node_seq = match node.1 {
+        let expected_seq = match node.1 {
             Dir::Left => self.graph.get_node(node.0).sequence(),
             Dir::Right => self.graph.get_node(node.0).sequence().rc(),
         };
-        let expected_seq = node_seq.slice(K::k() + offset, node_seq.len());
+        let expected_seq = expected_seq.slice(K::k(), expected_seq.len());
 
-        // skip the kmers in the iterator until the end of the unitig and check that the bases coincide
+        // advance the iterator to the beginning of the next node and
+        // check that it coincides with the whole node, not only with its first kmer
         for (idx, expected_base) in expected_seq.iter().enumerate() {
             let kmer = match self.kmer_iter.next() {
                 Some(kmer) => kmer,
@@ -114,13 +176,12 @@ impl<'a, K: Kmer, D: Vmer> NodeIterator<'a, K, D> {
                     break
                 },
             };
-            self.next_pos += 1;
+            self.current_end += 1;
             if expected_base != kmer.get(K::k()-1) {
-                return Err(PathwayError::UnitigNotMatching(node_seq.to_owned(), kmer, offset+1));
+                return Err(PathwayError::UnitigNotMatching(expected_seq.to_owned(), kmer, 1));
             }
         }
-        self.current_node = Some(node);
-        Ok(Some(node))
+        Ok(())
     }
 }
 
@@ -278,7 +339,7 @@ pub fn get_shortest_path_double_bfs<K: Kmer>(graph: &Graph<K>, start_node: (usiz
     Ok(path)
 }
 
-/// Wrapper for finding the shortest path in terms of nodes between two kmers.
+/// Wrapper to find the shortest path in terms of nodes between two kmers.
 pub fn get_shortest_path_nodes<K: Kmer>(graph: &Graph<K>, start: K, end: K) -> Result<DnaString, PathwayError<K>> {
     let (start, start_offset) = search_kmer_offset(graph, start, Dir::Left)
         .ok_or(PathwayError::KmerNotFound(start))?;
@@ -296,11 +357,11 @@ pub fn get_shortest_path_nodes<K: Kmer>(graph: &Graph<K>, start: K, end: K) -> R
 
 // Performs a BFS to find the next checkpoints in the graph
 fn get_next_checkpoint<K: Kmer, D: Vmer>(graph: &Graph<K>, unitig_iter: &mut NodeIterator<K,D>) -> Result<Option<((usize, Dir),(usize, Dir))>, PathwayError<K>> {
-    let start_node = match unitig_iter.current()? {
+    let start_node = match unitig_iter.peek() {
         Some(node) => node,
         None => return Ok(None),
     };
-    let start_position = unitig_iter.position();
+    let start_position = unitig_iter.start_position();
     let start_left_kmer = get_left_kmer(graph, start_node);
 
     let mut current_node = start_node;
@@ -357,7 +418,7 @@ fn get_next_checkpoint<K: Kmer, D: Vmer>(graph: &Graph<K>, unitig_iter: &mut Nod
 /// Breaks the input haplotype into segments corresponding to shortest paths (nb of nodes) in the graph.
 pub fn get_checkpoints_bfs<K: Kmer>(graph: &Graph<K>, haplo: &DnaRecord) -> Result<Vec<((usize, Dir),(usize, Dir))>, PathwayError<K>> {
     let seq = haplo.dna_string();
-    let mut unitig_iter = NodeIterator::new(graph, &seq);
+    let mut unitig_iter = NodeIterator::new(graph, &seq)?;
     let mut checkpoints = Vec::new();
 
     while let Some(node) = get_next_checkpoint(graph, &mut unitig_iter)? {
@@ -376,7 +437,7 @@ mod unit_test {
     use debruijn::kmer::Kmer3;
     use debruijn::{DnaSlice, dna_string::DnaString, Vmer, bits_to_ascii};
 
-    const STRANDED : bool = false;
+    const STRANDED : bool = true;
     const SEQ: DnaSlice = DnaSlice(&[2,2,2,1,1,1,1,2,2,2,0,0,0,0,0,1]);    // gggccccgggaaaaac
     const SHORTEST: DnaSlice = DnaSlice(&[2,2,2,0,0,1]); // gggaac
     // TODO: example with different result if stranded or not + example with different paths of the same length
@@ -394,7 +455,7 @@ mod unit_test {
     #[test]
     fn test_unitig_iterator() {
         let graph = Graph::<Kmer3>::from_seq_serial(SEQ, STRANDED);
-        let mut unitig_iter = NodeIterator::new(&graph, &SEQ);
+        let mut unitig_iter = NodeIterator::new(&graph, &SEQ).unwrap();
 
         let mut path = Vec::new();
         while let Some(node) = unitig_iter.next().unwrap() {

@@ -28,7 +28,6 @@ pub fn stats_graph<K: Kmer>(graph: &Graph<K>) {
 }
 
 /// Count the number of breakpoints in a graph, for a given haplotype
-#[deprecated]
 pub fn stats_haplo<K: Kmer>(graph: &Graph<K>, haplo: FastaReader) {
     eprint!("Iterating fasta file... ");
     std::io::stderr().flush().unwrap();
@@ -42,11 +41,11 @@ pub fn stats_haplo<K: Kmer>(graph: &Graph<K>, haplo: FastaReader) {
 
     for record in haplo {
         let seq = record.dna_string();
-        let mut node_iter = NodeIterator::new(graph, &seq);
+        kmer_count += seq.len() - K::k() + 1;
+        let mut node_iter = NodeIterator::new(graph, &seq).unwrap();
         while let Some((node_id, dir)) = node_iter.next().unwrap() {
             let node = graph.get_node(node_id);
             let node_length = node.len();
-            kmer_count += node_length;
             node_count += 1;
 
             // get the edges of the current unitig
@@ -59,5 +58,5 @@ pub fn stats_haplo<K: Kmer>(graph: &Graph<K>, haplo: FastaReader) {
     }
     let duration = start.elapsed();
     eprintln!("done in {:?}", duration);
-    eprintln!("Haplo contains:\n  - nodes {}\n  - kmers: {}\n  - breakpoints: {}  (>1)\t\t{}  (<1)", node_count, kmer_count, junctions, dead_ends);
+    eprintln!("Haplo contains:\n  - nodes: {}\n  - kmers: {}\n  - breakpoints: {}  (>1)\t\t{}  (<1)", node_count, kmer_count, junctions, dead_ends);
 }
