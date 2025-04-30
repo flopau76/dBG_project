@@ -1,3 +1,4 @@
+use rust_dbg::stats;
 use rust_dbg::{fasta_reader::FastaReader, graph::Graph, path};
 
 use debruijn::{kmer, Dir, Kmer};
@@ -15,8 +16,8 @@ use std::time::Instant;
 
 fn main() {
     // input/output files
-    let path_graph = "../data/output/chr1/AalbF5_k31.fna";
-    let path_bin = "../data/output/chr1/AalbF5_k31.bin";
+    let path_graph = "../data/output/chr1/graph_k31.fna";
+    let path_bin = "../data/output/chr1/graph_k31.bin";
     let path_fasta = "../data/input/chr1/AalbF5_splitN.fna";
     let path_checkpoints = "../data/output/chr1/checkpoints_AalbF5_in_2.fna";
 
@@ -28,14 +29,16 @@ fn main() {
     // save_graph(&graph, path_bin);
     let graph = load_graph::<Kmer31>(path_bin);
 
+    stats::stats_depth_bfs(&graph, 30, 100);
+
     // make_checkpoints(&graph, path_fasta);
     // let checkpoints = load_checkpoints(path_checkpoints);
     // stats_checkpoints::<Kmer31>(&graph, checkpoints);
     // reconstruct_fasta(&graph, checkpoints);
 
-    let haplo = FastaReader::new(path_fasta).unwrap();
-    rust_dbg::stats::stats_haplo(&graph, haplo);
-
+    // let haplo = FastaReader::new(path_fasta).unwrap();
+    // rust_dbg::stats::stats_haplo(&graph, haplo);
+    // rust_dbg::stats::stats_graph(&graph);
 }
 
 /// Create a graph from a unitigs file.
