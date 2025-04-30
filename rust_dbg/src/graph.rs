@@ -8,6 +8,7 @@ use ahash::AHashSet;
 use std::ops::{Deref, DerefMut};
 use serde::{Serialize, Deserialize};
 
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
@@ -78,7 +79,7 @@ impl<K: Kmer> Graph<K> {
     }
 
     /// Creates a graph from a fasta file containing unitigs (as returned by ggcat for example).
-    pub fn from_unitigs_serial(path:&str, stranded: bool) -> Graph<K> {
+    pub fn from_unitigs_serial(path: PathBuf, stranded: bool) -> Graph<K> {
         let mut base_graph: BaseGraph<K, ()> = BaseGraph::new(stranded);
 
         // Iterate over unitigs and add them to the graph
@@ -114,7 +115,7 @@ impl<K: Kmer+Send+Sync> Graph<K> {
     }
 
     /// Same as [from_unitigs_serial](Graph::from_unitigs_serial) but with some parallelisation.
-    pub fn from_unitigs(path:&str, stranded: bool) -> Self {
+    pub fn from_unitigs(path: PathBuf, stranded: bool) -> Self {
         let base_graph: BaseGraph<K, ()> = BaseGraph::new(stranded);
         let base_graph = Arc::new(Mutex::new(base_graph));
 
@@ -138,6 +139,8 @@ impl<K: Kmer+Send+Sync> Graph<K> {
 
 #[cfg(test)]
 mod unit_test {
+    use std::path::PathBuf;
+
     use super::Graph;
 
     use debruijn::kmer::Kmer3;
@@ -159,7 +162,7 @@ mod unit_test {
     #[test]
     #[ignore]
     fn test_from_unitigs() {
-        let graph = Graph::<Kmer3>::from_unitigs_serial(PATH_UNITIGS, STRANDED);
+        let graph = Graph::<Kmer3>::from_unitigs_serial(PathBuf::from(PATH_UNITIGS), STRANDED);
 
         println!("{:?}", graph.base.sequences);
         graph.print();
