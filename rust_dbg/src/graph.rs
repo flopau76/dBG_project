@@ -6,9 +6,13 @@ use debruijn::compression;
 
 use ahash::AHashSet;
 use std::ops::{Deref, DerefMut};
-use serde::{Serialize, Deserialize};
 
-use std::path::PathBuf;
+use serde::{Serialize, Deserialize};
+use bincode::serde::{encode_into_std_write, decode_from_std_read};
+
+use std::io::{Write, BufReader};
+use std::fs::File;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
@@ -30,7 +34,7 @@ impl<K: Kmer> DerefMut for Graph<K> {
     }
 }
 
-/// Serial construction
+// Serial construction
 impl<K: Kmer> Graph<K> {
 
     /// Utility function to get the correct extention of a node.
@@ -69,7 +73,7 @@ impl<K: Kmer> Graph<K> {
         }
     }
     
-    /// Creates a graph from a sequence of kmers. (For debugging mainly)
+    /// Create a graph from a sequence of kmers. (For debugging mainly)
     pub fn from_seq_serial(seq: impl Vmer, stranded: bool) -> Self {
         let can = |k: K| {if stranded {k} else {k.min_rc()}};
         let unique_kmers = seq.iter_kmers().map(|k| can(k)).collect::<AHashSet<K>>().into_iter().map(|k| (k, ())).collect::<Vec<_>>();
@@ -78,8 +82,8 @@ impl<K: Kmer> Graph<K> {
         Self(graph.finish_serial())
     }
 
-    /// Creates a graph from a fasta file containing unitigs (as returned by ggcat for example).
-    pub fn from_unitigs_serial(path: PathBuf, stranded: bool) -> Graph<K> {
+    /// Create a graph from a fasta file containing unitigs (as returned by ggcat for example).
+    pub fn from_unitigs_serial(path: &Path, stranded: bool) -> Self {
         let mut base_graph: BaseGraph<K, ()> = BaseGraph::new(stranded);
 
         // Iterate over unitigs and add them to the graph
@@ -98,7 +102,7 @@ impl<K: Kmer> Graph<K> {
     }
 }
 
-/// Parallel construction
+// Parallel construction
 impl<K: Kmer+Send+Sync> Graph<K> {
 
     /// Same as [Graph::fix_exts_serial] but with some parallelisation.
@@ -115,7 +119,7 @@ impl<K: Kmer+Send+Sync> Graph<K> {
     }
 
     /// Same as [from_unitigs_serial](Graph::from_unitigs_serial) but with some parallelisation.
-    pub fn from_unitigs(path: PathBuf, stranded: bool) -> Self {
+    pub fn from_unitigs(path: &Path, stranded: bool) -> Self {
         let base_graph: BaseGraph<K, ()> = BaseGraph::new(stranded);
         let base_graph = Arc::new(Mutex::new(base_graph));
 
@@ -134,6 +138,25 @@ impl<K: Kmer+Send+Sync> Graph<K> {
         // Update the links between the unitigs
         graph.fix_exts();
         graph
+    }
+}
+
+// Dump and load from binary
+impl<K: Kmer + Serialize> Graph<K> {
+    /// Write the graph as a binary
+    pub fn save_to_binary(&self, mut file_writer: Box<dyn Write>) -> Result<(), Box <dyn std::error::Error>> {
+        let config = bincode::config::standard();
+        let _ = encode_into_std_write(self, &mut file_writer, config)?;
+        Ok(())
+    }
+}
+impl<K: Kmer + for<'a> Deserialize<'a>> Graph<K> {
+    /// Load the graph from a binary file.
+    pub fn load_from_binary(path_bin: &Path) -> Result<Self, Box <dyn std::error::Error>> {
+        let mut f = BufReader::new(File::open(path_bin).unwrap());
+        let config = bincode::config::standard();
+        let graph = decode_from_std_read(&mut f, config)?;
+        Ok(graph)
     }
 }
 
@@ -162,7 +185,7 @@ mod unit_test {
     #[test]
     #[ignore]
     fn test_from_unitigs() {
-        let graph = Graph::<Kmer3>::from_unitigs_serial(PathBuf::from(PATH_UNITIGS), STRANDED);
+        let graph = Graph::<Kmer3>::from_unitigs_serial(&PathBuf::from(PATH_UNITIGS), STRANDED);
 
         println!("{:?}", graph.base.sequences);
         graph.print();
