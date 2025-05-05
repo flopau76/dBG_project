@@ -34,8 +34,44 @@ impl<K: Kmer> DerefMut for Graph<K> {
     }
 }
 
-// Serial construction
 impl<K: Kmer> Graph<K> {
+    /// Search a kmer at one side of the nodes
+    pub fn search_kmer(&self, kmer: K, side: Dir) -> Option<(usize, Dir)> {
+        match side {
+            Dir::Left => self.find_link(kmer, Dir::Right).map(|(id, dir, _)| (id, dir)),
+            Dir::Right => self.find_link(kmer, Dir::Left).map(|(id, dir, _)| (id, dir.flip()))
+        }
+    }
+    
+    /// Search a kmer within the nodes, by iterating over all the graph. Returns ((node_id, dir), offset) where offset is counted from the given side.
+    pub fn search_kmer_offset(&self, kmer: K, side: Dir) -> Option<((usize, Dir), usize)> {
+        // search first at the given extremity
+        if let Some((node_id, dir)) = self.search_kmer(kmer, side) {
+            return Some(((node_id, dir), 0));
+        }
+        // if not found, iterate over all kmers
+        let rc = kmer.rc();
+        for node_id in 0..self.len() {
+            for (offset, k) in self.get_node_kmer(node_id).into_iter().enumerate() {
+                if k == kmer {
+                     let offset = match side {
+                        Dir::Left => offset,
+                        Dir::Right => self.get_node(node_id).len() - K::k() - offset,
+                    };
+                    return Some(((node_id, side), offset));
+                }
+                // if not stranded, look for the reverse complement
+                else if !self.base.stranded && k == rc {
+                    let offset = match side {
+                        Dir::Left => self.get_node(node_id).len() - K::k() - offset,
+                        Dir::Right => offset,
+                    };
+                    return Some(((node_id, side.flip()), offset));
+                }
+            }
+        }
+        None
+    }
 
     /// Utility function to get the correct extention of a node.
     /// Returns Some(exts) if the extensions are incorrect, None otherwise.
@@ -104,7 +140,6 @@ impl<K: Kmer> Graph<K> {
 
 // Parallel construction
 impl<K: Kmer+Send+Sync> Graph<K> {
-
     /// Same as [Graph::fix_exts_serial] but with some parallelisation.
     fn fix_exts(&mut self) {
         // Get edges wich need update
