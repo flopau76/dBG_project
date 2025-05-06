@@ -2,16 +2,17 @@
 
 use crate::PathwayError;
 use crate::graph::Graph;
-use super::{node_iterator::NodeIterator, Extension};
+use super::Extension;
 
-use debruijn::{Dir, Vmer, Kmer};
+use debruijn::{Dir, Kmer};
 
 use ahash::AHashMap;
 use std::collections::hash_map::Entry;
 
 /// A struct that represents a shortest path extension by adding the shortest path towards a target node.
+#[derive(Debug, Clone)]
 pub struct ShortestPath {
-    target_node: (usize, Dir),
+    pub target_node: (usize, Dir),
 }
 
 impl<K: Kmer> Extension<K> for ShortestPath {
@@ -22,8 +23,8 @@ impl<K: Kmer> Extension<K> for ShortestPath {
         path.extend(extension);
     }
 
-    fn next(graph: &Graph<K>, path: &Vec<(usize, Dir)>, position: usize) -> Self {
-        todo!()
+    fn next(graph: &Graph<K>, path: &Vec<(usize, Dir)>, position: usize) -> Option<(Self, usize)> {
+        get_next_target_node(graph, path, position).unwrap()
     }
 }
 
@@ -43,12 +44,13 @@ fn advance_bfs<K: Kmer>(graph: &Graph<K>, queue: &mut Vec<(usize, Dir)>, parents
 }
 
 /// Get the shortest path between two nodes, using a double-ended BFS.
+/// Note: results corresponds to (start_node ... end_node]
 fn get_shortest_path<K: Kmer>(graph: &Graph<K>, start_node: (usize, Dir), end_node: (usize, Dir)) -> Result<Vec<(usize, Dir)>, PathwayError<K>> {
 
-    // edge case: start and end are the same
-    if start_node == end_node {
-        return Ok(vec![start_node]);
-    }
+    // // edge case: start and end are the same
+    // if start_node == end_node {
+    //     return Ok(vec![end_node]);
+    // }
 
     // initialize the BFS
     let mut parents_left= AHashMap::default();
@@ -94,11 +96,10 @@ fn get_shortest_path<K: Kmer>(graph: &Graph<K>, start_node: (usize, Dir), end_no
     // traceback left side by baktracking from the middle node
     let mut node = middle_node;
     let mut path = Vec::new();
-    path.push(node);
 
     while node != start_node {
-        node = *parents_left.get(&node).expect("Node not found in parents map");
         path.push(node);
+        node = *parents_left.get(&node).expect("Node not found in parents map");
     }
     path.reverse();
 
@@ -112,41 +113,37 @@ fn get_shortest_path<K: Kmer>(graph: &Graph<K>, start_node: (usize, Dir), end_no
     Ok(path)
 }
 
-// Perform a BFS to find the end of the longest path elongating allong the unitig iterator
-// Before, the unitig iterator must peek at the node following start_node
-// After, the unitig iterator peeks at the node following end_node
-pub fn get_next_target_node<K: Kmer, D: Vmer>(graph: &Graph<K>, unitig_iter: &mut NodeIterator<K,D>, start_node: (usize, Dir)) -> Result<Option<ShortestPath>, PathwayError<K>> {
+// Perform a BFS to find the end of the longest path elongating from the start_position given path.  
+// Return the next target node and the number of nodes in the path.
+pub fn get_next_target_node<K: Kmer>(graph: &Graph<K>, path: &Vec<(usize, Dir)>, start_position: usize) -> Result<Option<(ShortestPath, usize)>, PathwayError<K>> {
+    let mut node_iter = path.iter();
+    let start_node = *node_iter.nth(start_position).unwrap();
     let mut current_node = start_node;
-    let mut next_node = match unitig_iter.peek() {
+    let mut next_node = match node_iter.next() {
         Some(node) => node,
-        None => {
-            println!("1 unitigs:\t {:?}\t {:?}", start_node, start_node);
-            return Ok(Some(ShortestPath{target_node: start_node}))
-        },
+        None => return Ok(None)
     };
 
     // initialize the BFS
     let mut parents= AHashMap::default();
     let mut queue = Vec::new();
-    parents.insert(start_node, start_node);
-    queue.push(start_node);
+    queue.push(current_node);
 
     // perform the BFS
-    let mut depth: usize = 1;
-    while !parents.contains_key(&next_node) {
+    let mut depth: usize = 0;
+    while !parents.contains_key(next_node) && depth < 35 {
+        depth += 1;
         // explore the next level of the BFS
         queue = advance_bfs(graph, &mut queue, &mut parents, Dir::Left);    // TODO: handle case with several paths of shortest length
         assert!(parents.contains_key(&next_node));
 
         // advance the kmer iterator to the next node
-        current_node = next_node;
-        unitig_iter.advance()?;
-        next_node = match unitig_iter.peek() {
+        current_node = *next_node;
+        next_node = match node_iter.next() {
             Some(node) => node,
             None => break
         };
-        depth += 1;
     }
-    println!("{} unitigs:\t {:?}\t {:?}", depth, start_node, current_node);
-    Ok(Some(ShortestPath{target_node: current_node}))
+    // println!("{} unitigs:\t {:?}\t {:?}", depth, start_node, current_node);
+    Ok(Some((ShortestPath{target_node: current_node}, depth)))
 }

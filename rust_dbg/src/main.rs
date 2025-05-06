@@ -1,5 +1,8 @@
-use debruijn::graph::Node;
+use rust_dbg::fasta_reader::{self, FastaReader};
 use rust_dbg::graph::Graph;
+use rust_dbg::path::MixedPath;
+
+use debruijn::graph::Node;
 use debruijn::{kmer, Dir, Kmer};
 
 use std::fs::File;
@@ -46,6 +49,16 @@ enum Commands {
         #[arg(short, long)]
         input: PathBuf,
     },
+    /// Encode a continuous sequence into a path from the graph
+    Encode {
+        /// Path to the binary graph
+        #[arg(short, long)]
+        input: PathBuf,
+
+        /// Path to the sequence file
+        #[arg(short, long)]
+        seq: PathBuf,
+    }
 }
 
 impl Commands {
@@ -98,6 +111,16 @@ impl Commands {
                     eprintln!("{:>7} ", buble_histo[i]);
                 }
             },
+            Commands::Encode { input, seq } => {
+                let graph = Graph::<K>::load_from_binary(input).unwrap();
+                let fasta_reader = FastaReader::new(seq).unwrap();
+                for record in fasta_reader {
+                    println!("Record: {:?}", record.header());
+                    eprintln!("{:?}", record.header());
+                    let seq = record.dna_string();
+                    let path = MixedPath::encode_seq(&graph, &seq);  
+                }          
+            }
         }
     }
 }

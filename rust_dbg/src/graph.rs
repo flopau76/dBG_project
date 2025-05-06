@@ -110,7 +110,7 @@ impl<K: Kmer> Graph<K> {
     }
     
     /// Create a graph from a sequence of kmers. (For debugging mainly)
-    pub fn from_seq_serial(seq: impl Vmer, stranded: bool) -> Self {
+    pub fn from_seq_serial(seq: &impl Vmer, stranded: bool) -> Self {
         let can = |k: K| {if stranded {k} else {k.min_rc()}};
         let unique_kmers = seq.iter_kmers().map(|k| can(k)).collect::<AHashSet<K>>().into_iter().map(|k| (k, ())).collect::<Vec<_>>();
         let compression = compression::ScmapCompress::<()>::new();
@@ -211,7 +211,7 @@ mod unit_test {
     #[test]
     #[ignore]
     fn test_from_seq() {
-        let graph = Graph::<Kmer3>::from_seq_serial(SEQ, STRANDED);
+        let graph = Graph::<Kmer3>::from_seq_serial(&SEQ, STRANDED);
 
         println!("{:?}", graph.base.sequences);
         graph.print();
