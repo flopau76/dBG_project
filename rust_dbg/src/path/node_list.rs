@@ -8,7 +8,8 @@ use debruijn::dna_string::DnaString;
 
 use super::ElementaryPath;
 
-/// A list of consecutive nodes in the graph, representing a sequence
+/// A list of consecutive nodes in the graph, representing a sequence.
+/// Cost: 2 bits per node
 pub type NodeList = Vec<(usize, Dir)>;
 
 impl<K: Kmer> ElementaryPath<K> for NodeList {

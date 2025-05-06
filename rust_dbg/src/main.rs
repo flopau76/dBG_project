@@ -1,9 +1,15 @@
+use debruijn::graph::Node;
 use rust_dbg::graph::Graph;
-use debruijn::{kmer, Kmer};
+use debruijn::{kmer, Dir, Kmer};
+
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
+
 use serde::{Serialize, Deserialize};
+
+use std::collections::HashSet;
+
 use std::time::Instant;
 use clap::{Parser, Subcommand};
 
@@ -65,17 +71,64 @@ impl Commands {
             },
             Commands::Stats { input } => {
                 let graph = Graph::<K>::load_from_binary(input).unwrap();
-                let mut nb_edges: usize = 0;
                 let mut node_length: usize = 0;
+                let mut nb_edges: usize = 0;
+                let mut edges_histo: [[u32; 5]; 5] = [[0;5];5];
+                let mut buble_histo: [u32; 6] = [0; 6];
                 for node in graph.iter_nodes() {
                     node_length += node.len();
                     let exts = node.exts();
                     nb_edges +=  (exts.num_exts_l() + exts.num_exts_r()) as usize;
+                    edges_histo[exts.num_exts_l() as usize][exts.num_exts_r() as usize] += 1;
+                    if exts.num_exts_l() == 1 && exts.num_exts_r() == 1 {
+                        let buble = is_buble(&graph, node);
+                        buble_histo[buble as usize] += 1;
+                    }
                 }
                 eprintln!("Graph contains:\n   - {} nodes\n   - {} edges\nAverage node length: {}", graph.len(), nb_edges/2, node_length/graph.len());
+                eprintln!("Edges histogram:");
+                for i in 0..5 {
+                    for j in 0..5 {
+                        eprint!("{:>7} ", edges_histo[i][j]);
+                    }
+                    eprintln!();
+                }
+                eprintln!("Buble histogram:");
+                for i in 0..6 {
+                    eprintln!("{:>7} ", buble_histo[i]);
+                }
             },
         }
     }
+}
+
+fn is_buble<K: Kmer>(graph: &Graph<K>, node: Node<K, ()>) -> u8 {
+    let exts = node.exts();
+    if exts.num_exts_l() == 1 && exts.num_exts_r() == 1 {
+        let l = node.l_edges()[0];
+        let r = node.r_edges()[0];
+        if l.0 == r.0 && l.1 == r.1 {
+            return 0;   // simple repeat
+        }
+        let neighs_l: HashSet<(usize, Dir)> = graph.get_node(l.0).edges((Dir::Right).cond_flip(l.2)).into_iter().map(|e| (e.0, e.1)).collect();
+        let neighs_r: HashSet<(usize, Dir)> = graph.get_node(r.0).edges((Dir::Left).cond_flip(r.2)).into_iter().map(|e| (e.0, e.1.flip())).collect();
+        assert!(neighs_l.contains(&(node.node_id, Dir::Left)));
+        assert!(neighs_r.contains(&(node.node_id, Dir::Left)));
+        if neighs_l != neighs_r {
+            return 4;   // branching
+        }
+        for (n, _d) in neighs_l {
+            let exts = graph.get_node(n).exts();
+            if exts.num_exts_l() != 1 || exts.num_exts_r() != 1 {
+                return 2;   // complex buble
+            }
+        }
+        if neighs_r.len() == 2 {
+            return 1;   // simple buble
+        }
+        return 3;   // multiple buble
+    }
+    return 5;   // not a buble
 }
 
 

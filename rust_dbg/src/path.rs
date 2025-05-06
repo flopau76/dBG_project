@@ -1,12 +1,23 @@
-//! Defines how to encode a path in a debruijn Graph
+//! Defines how to encode a path in a debruijn Graph. Pri
  
-use debruijn::Kmer;
+use debruijn::{Dir, Kmer};
 use debruijn::dna_string::DnaString;
 
 use crate::graph::Graph;
 
 pub mod node_list;
 pub mod shortest_path;
+
+pub struct Path<'a, K: Kmer> {
+    graph: &'a Graph<K>,
+    start_node: (usize, Dir),
+    extensions: Vec<Box<dyn Extension<K>>>,
+}
+
+/// Some information about how to extend a path in a given graph
+pub trait Extension<K: Kmer> {
+    fn extend(&self, graph: &Graph<K>, path: &mut Vec<(usize, Dir)>);
+}
 
 /// An elementary path represents a continuous sequence of nucleotides
 pub trait ElementaryPath<K: Kmer> {
@@ -24,6 +35,16 @@ impl<K: Kmer> ElementaryPath<K> for DnaString {
     fn encode_seq(seq: &DnaString, _graph: &Graph<K>) -> Self {
         seq.to_owned()
     }
+}
+
+/// Encode a haplotype into a de Bruijn graph, using a few memory as possible
+pub fn encode_haplotype<K: Kmer>(_seq: &DnaString, _graph: &Graph<K>) -> Vec<DnaString> {
+    todo!()
+}
+
+/// Decode a haplotype from a de Bruijn graph
+pub fn decode_haplotype<K: Kmer>(_code: Vec<Box<impl ElementaryPath<K>>>, _graph: &Graph<K>) -> Vec<DnaString> {
+    todo!()
 }
 
 #[cfg(test)]

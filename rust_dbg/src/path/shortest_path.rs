@@ -149,6 +149,9 @@ fn get_next_shortest_path<K: Kmer, D: Vmer>(graph: &Graph<K>, unitig_iter: &mut 
     Ok(Some(ShortestPath::new(start_node, current_node)))
 }
 
+
+/// A division of a sequence into several shortest paths
+/// Cost: ~32 bits / path (average size 15, up to 35 nodes)
 pub type ShortestPathList = Vec<ShortestPath>;
 
 impl<K: Kmer> ElementaryPath<K> for ShortestPathList {
