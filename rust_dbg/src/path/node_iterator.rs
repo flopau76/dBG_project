@@ -6,21 +6,6 @@ use crate::graph::Graph;
 use debruijn::{Dir, Mer, Vmer, Kmer, KmerIter};
 use debruijn::dna_string::DnaString;
 
-use super::ElementaryPath;
-
-/// A list of consecutive nodes in the graph, representing a sequence.
-/// Cost: 2 bits per node
-pub type NodeList = Vec<(usize, Dir)>;
-
-impl<K: Kmer> ElementaryPath<K> for NodeList {
-    fn decode_seq(&self, graph: &Graph<K>) -> DnaString {
-        graph.sequence_of_path(self.iter())
-    }
-    fn encode_seq(seq: &DnaString, graph: &Graph<K>) -> Self {
-        // TODO: handle start/end offset
-        NodeIterator::new(graph, seq).unwrap().collect()
-    }
-}
 
 /// Iterator over a dna sequence, following the nodes in the graph. This will raise an error if the sequence from kmer_iter is not present in the graph.
 pub struct NodeIterator<'a, K: Kmer, D: Vmer> {
