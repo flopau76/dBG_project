@@ -1,4 +1,4 @@
-use rust_dbg::fasta_reader::{self, FastaReader};
+use rust_dbg::fasta_reader::FastaReader;
 use rust_dbg::graph::Graph;
 use rust_dbg::path::MixedPath;
 
