@@ -169,12 +169,14 @@ _________
 ## Réunion du 28/04
 Pas grand chose. Complexité mémoire mieux que l'encodage des couleurs mais efficacité temporelle à revoir
 
+### 28/04 au 05/05
+- interface ligne de commande
+- refactorisation du code pour pouvoir intégrer d'autre mode d'encodage polus facilement
+- histogramme des degrés et caractérisation des noeuds avec 1-1 (bulle/repeat/autre)
 
-______________
-TODO:
-- efficacité: de manière générale, get_checkpoinyts est bcp trop lent. remplacer get_kmer_offset lorsqu'on initialise un NodeIterator
-- correction: pourquoi la reconstruction n'est pas parfaite ?
-- stats: coût encodage + comparaison couleurs
+_________
+## Réunion du 06/05
+A faire (cf cahier)
 
 
 ## Comparaison crates rust

@@ -1,0 +1,25 @@
+\begin{tikzpicture}[scale=1.5]
+    % First row of nodes
+    \node (A1) at (2, 2) {AGC};
+    
+    % Second row of nodes
+    \node (B1) at (0, 0) {GCT};
+    \node (B2) at (2, 0) {CTGA};
+    \node (B3) at (4, 0) {GAG};
+    \node (B4) at (6, 0) {AGT};
+    
+    % Third row of nodes
+    \node (C1) at (3, -2) {CTAAG};
+    
+    % Edges between nodes
+    \draw[->] (B1) -- (B2);
+    \draw[->] (B2) -- (B3);
+    \draw[->] (B3) -- (B4);
+
+    \draw[->] (B1) -- (C1);
+    \draw[->] (C1) -- (B4);
+
+    
+    \draw[<-] (B1) -- (A1);
+    \draw[<-] (A1) -- (B3);
+  \end{tikzpicture}

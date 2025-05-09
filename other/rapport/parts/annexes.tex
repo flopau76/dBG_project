@@ -1,0 +1,104 @@
+%Ne pas numéroter cette partie
+\part*{Annexes}
+%Rajouter la ligne "Annexes" dans le sommaire
+\addcontentsline{toc}{part}{Annexes}
+
+
+\chapter*{Annexe 1}
+\addcontentsline{toc}{chapter}{Annexe 1}
+
+%changer le format des sections, subsections pour apparaittre sans le num de chapitre
+\makeatletter
+\renewcommand{\thesection}{\@arabic\c@section}
+\makeatother
+
+%recommencer la numérotation des section à "1"
+\setcounter{section}{0}
+Intro
+\section{Partie 1}
+Bla
+\subsection{Sous-partie 1}
+Bla
+\subsection{Sous-partie 2}
+Bla
+\section{Partie 2}
+Bla
+\subsection{Sous-partie 1}
+Bla
+
+\chapter*{Annexe 2}
+\addcontentsline{toc}{chapter}{Annexe 2}
+
+%recommencer la numérotation des section à "1"
+\setcounter{section}{0}
+\begin{itemize}
+\item item1;
+\item item2;
+\item item3;
+\item item4.
+\end{itemize}
+
+Bla
+
+\begin{center}
+\textsc{Attention !}
+
+\textit{Texte d'avertissement}
+\end{center}
+
+Bla
+
+\newpage
+
+\section{Partie 3}
+Bla
+% \begin{figure}[!ht]
+% \begin{center}
+% \includegraphics[height=8cm]{presentation/schema}
+% \end{center}
+% \caption[schema]{Presentation schema}
+% \end{figure}
+
+\paragraph*{Paragraphe 1}
+~\\
+\hskip7mm
+Bla
+\paragraph*{Paragraphe 2}
+~\\
+\hskip7mm
+Bla
+
+%tableau centré à taille variable qui s'ajuste automatiquement suivant la longueur du contenu
+\begin{figure}[!h]
+    \begin{center}
+    \begin{tabular}{|l|l|l|l|l|}
+      \hline
+      Solution & Critère 1 & Critère 2 & Critère 3 & Critère 4\\
+      \hline
+      Solution 1(cf. ref. \cite{cite0}) & Oui & Oui & Oui & Oui \\
+      Solution 2(cf. ref. \cite{cite1}) & Oui & Oui & Oui & Non \\
+      Solution 3(cf. ref. \cite{cite2}) & Oui (sauf telle chose) & Non & Non & Oui\\
+      Solution 4(cf. ref. \cite{cite3}) & Oui& Non & Oui & Non\\
+      Solution 5(cf. ref. \cite{cite4}) & Oui (uniquement ceux-ci) & Non & Oui & Non\\
+      \hline
+    \end{tabular}
+    \end{center}
+    \caption{Tableau récapitulatif des solutions}
+\end{figure}
+
+
+%galerie d'image
+% \begin{figure}[htp]
+%     \centering
+%     \subfloat[Première image]{\label{fig:première}\includegraphics[scale=0.8]{resultats/gallerie}}
+%     ~ %espace entre deux images sur une même ligne
+%     \subfloat[Deuxième image]{\label{fig:deuxième}\includegraphics[scale=0.8]{resultats/gallerie}}
+%     ~
+%     \subfloat[Troisième image]{\label{fig:troisième}\includegraphics[scale=0.8]{resultats/gallerie}}
+%     ~\\ %saute une ligne dans la galerie d'image
+%     \subfloat[Quatrième image]{\label{fig:quatrième}\includegraphics[scale=0.8]{resultats/gallerie}}
+%     ~
+%     \subfloat[Cinquième image]{\label{fig:cinquième}\includegraphics[scale=0.8]{resultats/gallerie}}
+%     \caption{Différents screenshots quelque chose, en gallerie}
+%     \label{fig:gallerie1}
+% \end{figure}

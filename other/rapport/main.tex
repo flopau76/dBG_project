@@ -1,0 +1,98 @@
+\documentclass[12pt,a4paper]{report}
+
+%====================== PACKAGES ======================
+
+\usepackage[english]{babel}
+\usepackage[utf8x]{inputenc}
+%pour gérer les positionnement d'images
+\usepackage{float}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage[colorinlistoftodos]{todonotes}
+\usepackage{url}
+%pour les informations sur un document compilé en PDF et les liens externes / internes
+\usepackage{hyperref}
+%pour la mise en page des tableaux
+\usepackage{array}
+\usepackage{tabularx}
+%espacement entre les lignes
+\usepackage{setspace}
+\usepackage{parskip}
+%modifier la mise en page de l'abstract
+\usepackage{abstract}
+%police et mise en page (marges) du document
+\usepackage[T1]{fontenc}
+\usepackage{times}
+\usepackage[top=2cm, bottom=2cm, left=2.5cm, right=2.5cm]{geometry}
+%Pour les galerie d'images
+\usepackage{subfig}
+%pour les graphes
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta}
+
+%====================== INFORMATION ET REGLES ======================
+
+% Configuration de l'espacement
+\onehalfspacing
+
+% Configuration des légendes de figures
+\captionsetup{font={small,rm},labelsep=period,skip=4pt}
+
+\hypersetup{							% Information sur le document
+pdfauthor = {Florence PAUTET},			% Auteurs
+pdftitle = {Nom du Projet -
+			Sujet du Projet},			% Titre du document
+pdfsubject = {Rapport de stage},		% Sujet
+pdfkeywords = {Tag1, Tag2, Tag3},	% Mots-clefs
+pdfstartview={FitH}}					% ajuste la page à la largueur de l'écran
+
+%======================== DEBUT DU DOCUMENT ========================
+
+\begin{document}
+
+% parameters tiks
+\tikzset{every node/.style={circle, draw, minimum size=1.2cm, text width=1.2cm, align=center, font=\small}}
+\tikzset{>={Stealth[scale=2]}}
+
+%ligne horizontale
+\newcommand{\HRule}{\rule{\linewidth}{0.5mm}}
+%espacement entre les lignes d'un tableau
+\renewcommand{\arraystretch}{1.5}
+
+%page de garde
+\input{./parts/title.tex}
+
+\newpage
+\input{./parts/abstract.tex}
+
+\tableofcontents
+\thispagestyle{empty}
+
+
+
+%====================== INCLUSION DES PARTIES ======================
+
+\newpage
+\setcounter{page}{1}
+
+\input{./parts/introduction.tex}
+
+\input{./parts/methods.tex}
+
+\input{./parts/results.tex}
+
+\input{./parts/conclusion.tex}
+
+\input{./parts/annexes.tex}
+
+\newpage
+
+%récupérer les citation avec "/footnotemark"
+\nocite{*}
+
+%choix du style de la biblio
+\bibliographystyle{plain}
+%inclusion de la biblio
+\bibliography{bibliographie.bib}
+
+\end{document}

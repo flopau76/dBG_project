@@ -1,0 +1,34 @@
+\chapter{Preliminaries}
+
+\section{De Bruijn Graphs}
+
+\subsection{Definition}
+
+A \textbf{kmer} is a string of length $k$ over the alphabet $\Sigma$.
+
+For $R$ a given set of strings over $\Sigma$, the representing \textbf{de Bruijn graph} of order $k$ is the directed graph $G = (V, E)$ where:
+\begin{itemize}
+    \item Each vertex corresponds to a unique kmer in $R$.
+    \item There is a directed edge from vertex $u$ to vertex $v$ if and only if the suffix of $u$ of length $k-1$ is identical to the prefix of $v$ of length $k-1$
+\end{itemize}
+
+In genomic applications, the alphabet $\Sigma$ typically consists of the four nucleotides: $\Sigma = \{A, C, G, T\}$.
+
+\input{./parts/graphs/graph.tex}
+
+\subsection{Compact de Bruijn Graphs}
+
+\input{./parts/graphs/graph_compacted.tex}
+
+\subsection{Colored de Bruijn Graphs}
+
+\input{./parts/graphs/graph_colored.tex}
+
+
+% \begin{figure}[htbp]
+%     \centering
+%     % Placeholder for a de Bruijn graph illustration
+%     % \includegraphics[width=0.8\textwidth]{debruijn_graph_example.png}
+%     \caption{Example of a de Bruijn graph constructed from short reads. (a) Original reads. (b) Extraction of $k$-mers ($k=3$). (c) Resulting de Bruijn graph where nodes are $(k-1)$-mers and edges represent $k$-mers. (d) A possible Eulerian path through the graph (highlighted) representing a candidate assembly.}
+%     \label{fig:debruijn}
+% \end{figure}
