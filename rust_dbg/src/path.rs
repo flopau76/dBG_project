@@ -5,44 +5,87 @@ use debruijn::{dna_string::DnaString, Dir, Kmer};
 use crate::graph::Graph;
 use self::{node_iterator::NodeIterator, shortest_path::ShortestPath};
 
-use std::fmt::Debug;
+use std::{fmt::Debug, path::Path};
+use std::io::{BufReader, BufRead};
 
 pub mod node_iterator;
 pub mod shortest_path;
 
 /// Some information about how to extend a path in a given graph
-trait Extension<K: Kmer>: Debug {
+trait Extension : Debug {
     /// Get the next extension and the number of incoded nodes, given the full path and the current node in the path
-    fn next(graph: &Graph<K>, path: &Vec<(usize, Dir)>, position: usize) -> Option<(Self, usize)> where Self: Sized;
+    fn next<K: Kmer>(graph: &Graph<K>, path: &Vec<(usize, Dir)>, position: usize) -> Option<Self> where Self: Sized;
     /// Extend the current path given the extension
-    fn extend_path(&self, graph: &Graph<K>, path: &mut Vec<(usize, Dir)>);
+    fn extend_path<K: Kmer>(&self, graph: &Graph<K>, path: &mut Vec<(usize, Dir)>);
+    /// Get the length of this extension
+    fn length(&self) -> usize;
 }
 
 /// The easiest way to extend the current path is to give the following node
-impl<K: Kmer> Extension<K> for (usize, Dir) {
-    fn next(_graph: &Graph<K>, path: &Vec<(usize, Dir)>, position: usize) -> Option<(Self, usize)> {
-        path.get(position+1).map(|node| (*node, 1))
+pub struct NextNode {
+    next_node: (usize, Dir),
+}
+
+impl Debug for NextNode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "NN{:?}", self.next_node)
     }
-    fn extend_path(&self, _graph: &Graph<K>, path: &mut Vec<(usize, Dir)>) {
-        path.push(*self);
+}
+
+impl Extension for NextNode {
+    fn next<K: Kmer>(_graph: &Graph<K>, path: &Vec<(usize, Dir)>, position: usize) -> Option<Self> {
+        if position + 1 < path.len() {
+            Some(NextNode { next_node: path[position + 1] })
+        } else {
+            None
+        }
+    }
+    fn extend_path<K: Kmer>(&self, _graph: &Graph<K>, path: &mut Vec<(usize, Dir)>) {
+        path.push(self.next_node);
+    }
+    fn length(&self) -> usize {
+        1
     }
 }
 
 enum MyExtension {
-    ShortestPath(shortest_path::ShortestPath),
-    NextNode((usize, Dir)),
-    // Repetition ?
+    ShortestPath(ShortestPath),
+    NextNode(NextNode),
 }
 impl Debug for MyExtension {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            MyExtension::ShortestPath(sp) => write!(f, "SP{:?}", sp.target_node),
-            MyExtension::NextNode(node) => write!(f, "NN{:?}", node),
+            MyExtension::ShortestPath(sp) => write!(f, "{:?}", sp),
+            MyExtension::NextNode(nn) => write!(f, "{:?}", nn),
+        }
+    }
+}
+impl Extension for MyExtension {
+    fn next<K: Kmer>(graph: &Graph<K>, path: &Vec<(usize, Dir)>, position: usize) -> Option<Self> {
+        if let Some(sp) = ShortestPath::next(graph, path, position) {
+            Some(MyExtension::ShortestPath(sp))
+        } else if let Some(nn) = NextNode::next(graph, path, position) {
+            Some(MyExtension::NextNode(nn))
+        } else {
+            None
+        }
+    }
+    fn extend_path<K: Kmer>(&self, graph: &Graph<K>, path: &mut Vec<(usize, Dir)>) {
+        match self {
+            MyExtension::ShortestPath(sp) => sp.extend_path(graph, path),
+            MyExtension::NextNode(nn) => nn.extend_path(graph, path),
+        }
+    }
+    fn length(&self) -> usize {
+        match self {
+            MyExtension::ShortestPath(sp) => sp.length(),
+            MyExtension::NextNode(nn) => nn.length(),
         }
     }
 }
 
 pub struct MixedPath<'a, K: Kmer> {
+    name: Option<String>,
     graph: &'a Graph<K>,
     start_node: (usize, Dir),
     extensions: Vec<MyExtension>,
@@ -55,22 +98,23 @@ impl<'a, K: Kmer> MixedPath<'a, K> {
         println!("Start node: {:?}", start_node);
         let mut extensions = Vec::new();
         let mut position = 0;
-        while let Some((path, path_length)) = ShortestPath::next(graph, &nodes, position) {
-            if path_length >= 0 {
-                position += path_length;
-                let ext = MyExtension::ShortestPath(path);
-                println!("{:?}: {:?}", path_length, ext);
-                extensions.push(ext);
+        while let Some(path) = ShortestPath::next(graph, &nodes, position) {
+            let length = path.length();
+            if length >= 0 {
+                position += length;
+                println!("{}: {:?}", length, path);
+                extensions.push(MyExtension::ShortestPath(path));
             } else {
-                for _ in 0..path_length {
+                for _ in 0..length {
                     position += 1;
-                    let ext = MyExtension::NextNode(nodes[position]);
-                    println!("{:?}: {:?}",1, ext);
-                    extensions.push(ext);
+                    let next_node = NextNode{next_node: nodes[position]};
+                    println!("{}: {:?}", 1, next_node);
+                    extensions.push(MyExtension::NextNode(next_node));
                 }
             }
         }
         MixedPath {
+            name: None,
             graph,
             start_node,
             extensions,
@@ -80,12 +124,22 @@ impl<'a, K: Kmer> MixedPath<'a, K> {
     pub fn decode_seq(&self) -> DnaString {
         let mut path = vec![self.start_node];
         for ext in self.extensions.iter() {
-            match ext {
-                MyExtension::ShortestPath(sp) => sp.extend_path(self.graph, &mut path),
-                MyExtension::NextNode(node) => node.extend_path(self.graph, &mut path),
-            }
+            ext.extend_path(self.graph, &mut path);
         }
         self.graph.sequence_of_path(path.iter())
+    }
+
+    pub fn from_text_file(graph: &'a Graph<K>, file: &Path) -> Vec<Self> {
+        let file = BufReader::new(std::fs::File::open(file).unwrap());
+        let mut lines_iter = file.lines().map(|l| l.unwrap());
+        while let Some(line) = lines_iter.next() {
+            if line.starts_with('>') {
+                let name = line[1..].to_string();
+                let first_line = lines_iter.next().unwrap();
+                let start_node = first_line.split(":").nth(1).unwrap();
+            }
+        }
+        todo!();
     }
 }
 
@@ -116,7 +170,6 @@ mod unit_test {
         assert!(path_seq == seq);
 
         // println!("Path: {:?}", path);
-
         // println!("{:?}", graph.base.sequences);
         // graph.print();
     }

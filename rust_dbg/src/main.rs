@@ -58,6 +58,16 @@ enum Commands {
         /// Path to the sequence file
         #[arg(short, long)]
         seq: PathBuf,
+    },
+    /// Decode a path to retrieve the original sequence
+    Decode {
+        /// Path to the binary graph
+        #[arg(short, long)]
+        input: PathBuf,
+
+        /// Path to the encoding file
+        #[arg(short, long)]
+        seq: PathBuf,
     }
 }
 
@@ -94,7 +104,7 @@ impl Commands {
                     nb_edges +=  (exts.num_exts_l() + exts.num_exts_r()) as usize;
                     edges_histo[exts.num_exts_l() as usize][exts.num_exts_r() as usize] += 1;
                     if exts.num_exts_l() == 1 && exts.num_exts_r() == 1 {
-                        let buble = is_buble(&graph, node);
+                        let buble = is_bubble(&graph, node);
                         buble_histo[buble as usize] += 1;
                     }
                 }
@@ -106,9 +116,9 @@ impl Commands {
                     }
                     eprintln!();
                 }
-                eprintln!("Buble histogram:");
-                for i in 0..6 {
-                    eprintln!("{:>7} ", buble_histo[i]);
+                eprintln!("Bubble histogram:");
+                for bubble  in vec!["simple repeat", "simple bubble", "complex bubble", "multiple bubble", "branching"].iter().zip(buble_histo.iter()) {
+                    eprintln!("{}: {:>7} ", bubble.0, bubble.1);
                 }
             },
             Commands::Encode { input, seq } => {
@@ -119,13 +129,17 @@ impl Commands {
                     eprintln!("{:?}", record.header());
                     let seq = record.dna_string();
                     let path = MixedPath::encode_seq(&graph, &seq);  
-                }          
+                }
+            }
+            Commands::Decode { input, seq } => {
+                let graph = Graph::<K>::load_from_binary(input).unwrap();
+                todo!();
             }
         }
     }
 }
 
-fn is_buble<K: Kmer>(graph: &Graph<K>, node: Node<K, ()>) -> u8 {
+fn is_bubble<K: Kmer>(graph: &Graph<K>, node: Node<K, ()>) -> u8 {
     let exts = node.exts();
     if exts.num_exts_l() == 1 && exts.num_exts_r() == 1 {
         let l = node.l_edges()[0];
@@ -143,15 +157,15 @@ fn is_buble<K: Kmer>(graph: &Graph<K>, node: Node<K, ()>) -> u8 {
         for (n, _d) in neighs_l {
             let exts = graph.get_node(n).exts();
             if exts.num_exts_l() != 1 || exts.num_exts_r() != 1 {
-                return 2;   // complex buble
+                return 2;   // complex bubble
             }
         }
         if neighs_r.len() == 2 {
-            return 1;   // simple buble
+            return 1;   // simple bubble
         }
-        return 3;   // multiple buble
+        return 3;   // multiple bubble
     }
-    return 5;   // not a buble
+    return 5;   // not a bubble
 }
 
 

@@ -7,24 +7,33 @@ use super::Extension;
 use debruijn::{Dir, Kmer};
 
 use ahash::AHashMap;
-use std::collections::hash_map::Entry;
+use std::{collections::hash_map::Entry, fmt::Debug};
 
 /// A struct that represents a shortest path extension by adding the shortest path towards a target node.
-#[derive(Debug, Clone)]
+#[derive(Copy, Clone)]
 pub struct ShortestPath {
-    pub target_node: (usize, Dir),
+    target_node: (usize, Dir),
+    length: usize,
 }
 
-impl<K: Kmer> Extension<K> for ShortestPath {
-    fn extend_path(&self, graph: &Graph<K>, path: &mut Vec<(usize, Dir)>) {
+impl Debug for ShortestPath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "SP{:?}", self.target_node)
+    }
+}
+
+impl Extension for ShortestPath {
+    fn extend_path<K: Kmer>(&self, graph: &Graph<K>, path: &mut Vec<(usize, Dir)>) {
         let start_node = *path.last().unwrap();
         let end_node = self.target_node;
         let extension = get_shortest_path(graph, start_node, end_node).unwrap();
         path.extend(extension);
     }
-
-    fn next(graph: &Graph<K>, path: &Vec<(usize, Dir)>, position: usize) -> Option<(Self, usize)> {
+    fn next<K: Kmer>(graph: &Graph<K>, path: &Vec<(usize, Dir)>, position: usize) -> Option<Self> {
         get_next_target_node(graph, path, position).unwrap()
+    }
+    fn length(&self) -> usize {
+        self.length
     }
 }
 
@@ -115,7 +124,7 @@ fn get_shortest_path<K: Kmer>(graph: &Graph<K>, start_node: (usize, Dir), end_no
 
 // Perform a BFS to find the end of the longest path elongating from the start_position given path.  
 // Return the next target node and the number of nodes in the path.
-pub fn get_next_target_node<K: Kmer>(graph: &Graph<K>, path: &Vec<(usize, Dir)>, start_position: usize) -> Result<Option<(ShortestPath, usize)>, PathwayError<K>> {
+pub fn get_next_target_node<K: Kmer>(graph: &Graph<K>, path: &Vec<(usize, Dir)>, start_position: usize) -> Result<Option<ShortestPath>, PathwayError<K>> {
     let mut node_iter = path.iter();
     let start_node = *node_iter.nth(start_position).unwrap();
     let mut current_node = start_node;
@@ -145,5 +154,5 @@ pub fn get_next_target_node<K: Kmer>(graph: &Graph<K>, path: &Vec<(usize, Dir)>,
         };
     }
     // println!("{} unitigs:\t {:?}\t {:?}", depth, start_node, current_node);
-    Ok(Some((ShortestPath{target_node: current_node}, depth)))
+    Ok(Some(ShortestPath{target_node: current_node, length:depth}))
 }
