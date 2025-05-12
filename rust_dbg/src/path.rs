@@ -145,7 +145,26 @@ mod unit_test {
     const _SHORTEST: DnaSlice = DnaSlice(&[2,2,2,0,0,1]); // gggaac
 
     #[test]
-    fn test_unitig_iterator() {
+    fn test_node_iterator_offset() {
+        let seq = DnaString::from_dna_string("aaccggtt");
+        let graph = Graph::<Kmer3>::from_seq_serial(&seq, true);
+
+        let seq_start = DnaString::from_dna_string("aacc");
+        let unitig_iter_start = NodeIterator::new(&graph, &seq_start).unwrap();
+        assert_eq!(unitig_iter_start.start_offset, 0);
+        assert_eq!(unitig_iter_start.end_offset, Some(4));
+
+        let seq_end = DnaString::from_dna_string("ggtt");
+        let unitig_iter_end = NodeIterator::new(&graph, &seq_end).unwrap();
+        assert_eq!(unitig_iter_end.start_offset, 4);
+        assert_eq!(unitig_iter_end.end_offset, None);
+
+        // let seq_middle = DnaString::from_dna_string("ccgg");
+        // let unitig_iter_middle = NodeIterator::new(&graph, &seq_middle).unwrap();
+    }
+
+    #[test]
+    fn test_node_iterator() {
         let graph = Graph::<Kmer3>::from_seq_serial(&SEQ, STRANDED);
         let mut unitig_iter = NodeIterator::new(&graph, &SEQ).unwrap();
 

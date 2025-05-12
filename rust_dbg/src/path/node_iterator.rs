@@ -28,7 +28,7 @@ impl<'a, K: Kmer, D: Vmer> NodeIterator<'a, K, D> {
         };
 
         // initialise the iterator by looking for the first kmer
-        let mut kmer = node_iter.kmer_iter.next().expect("kmer iter is empty");
+        let mut kmer = node_iter.kmer_iter.next().expect("sequence shorter than kmer size");
         let node = graph.search_kmer(kmer, Dir::Left);
 
         // first kmer corresponds to the start of a node
@@ -36,24 +36,21 @@ impl<'a, K: Kmer, D: Vmer> NodeIterator<'a, K, D> {
             node_iter.next_node = node;
             let node = node.unwrap();
             // get the sequence of this node
-            let expected_seq = match node.1 {
+            let node_seq = match node.1 {
                 Dir::Left => graph.get_node(node.0).sequence(),
                 Dir::Right => graph.get_node(node.0).sequence().rc(),
             };
-            let expected_seq = expected_seq.slice(K::k(), expected_seq.len());
-
-            // advance the kmer iterator to the end of this node and
-            // check that the sequence from kmer_iter coincides with the whole node, not only with its first kmer
-            for (idx, expected_base) in expected_seq.iter().enumerate() {
-                let kmer = match node_iter.kmer_iter.next(){
-                    Some(kmer) => kmer,
-                    None => {
-                        node_iter.end_offset = Some(expected_seq.len()-idx);
-                        break
-                    },
+        
+            // advance the kmer iterator to the end of this node
+            for position in K::k()..node_seq.len() {
+                let kmer = node_iter.kmer_iter.next();
+                if kmer.is_none() {
+                    node_iter.end_offset = Some(position);
+                    return Ok(node_iter);
                 };
-                if expected_base != kmer.get(K::k()-1) {
-                    return Err(PathwayError::UnitigNotMatching(expected_seq.to_owned(), kmer, 1));
+                let kmer = kmer.unwrap();
+                if node_seq.get(position) != kmer.get(K::k()-1) {
+                    return Err(PathwayError::NodeNotMatching(node_seq.to_owned(), kmer, position));
                 }
             }
         }
@@ -64,26 +61,21 @@ impl<'a, K: Kmer, D: Vmer> NodeIterator<'a, K, D> {
             let mut skipped_bases = DnaString::new();
             while node.is_none() {
                 skipped_bases.push(kmer.get(0));
-                kmer = match node_iter.kmer_iter.next() {
-                    Some(kmer) => kmer,
-                    None => {
-                        // edge case: the sequence from kmer_iter is contained within a single node
-                        todo!("fix case when sequence is included within a single node");
-                    },
-                };
+                kmer = node_iter.kmer_iter.next().expect("sequence contains neither begining nor end of a node");
                 node = graph.search_kmer(kmer, Dir::Right);
             }
             node_iter.next_node = node;
             let node = node.unwrap();
-            node_iter.start_offset = graph.get_node(node.0).len() - skipped_bases.len();
-            // verify that the skipped bases coincide with the beginning of the node
-            let expected_seq = match node.1 {
+            let node_seq = match node.1 {
                 Dir::Left => graph.get_node(node.0).sequence(),
                 Dir::Right => graph.get_node(node.0).sequence().rc(),
             };
-            let expected_seq = expected_seq.slice(node_iter.start_offset, expected_seq.len()-K::k()).to_owned();
+            node_iter.start_offset = node_seq.len() - skipped_bases.len() - K::k();
+            let expected_seq = node_seq.slice(node_iter.start_offset, node_seq.len()-K::k()).to_owned();
             if expected_seq != skipped_bases {
-                return Err(PathwayError::UnitigNotMatching(expected_seq, kmer, 0));
+                println!("skipped bases: {:?}", skipped_bases);
+                println!("expected bases: {:?}", expected_seq);
+                return Err(PathwayError::NodeNotMatching(expected_seq, kmer, 0));   // todo: proper values here
             }
         }
         Ok(node_iter)
@@ -132,7 +124,7 @@ impl<'a, K: Kmer, D: Vmer> NodeIterator<'a, K, D> {
                 },
             };
             if expected_base != kmer.get(K::k()-1) {
-                return Err(PathwayError::UnitigNotMatching(expected_seq.to_owned(), kmer, 1));
+                return Err(PathwayError::NodeNotMatching(expected_seq.to_owned(), kmer, 1));
             }
         }
         Ok(())

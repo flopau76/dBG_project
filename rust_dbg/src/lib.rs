@@ -43,7 +43,7 @@ use debruijn::Kmer;
 pub enum PathwayError<K> {
     NoPathExists,
     KmerNotFound(K),
-    UnitigNotMatching(DnaString, K, usize),
+    NodeNotMatching(DnaString, K, usize),
 }
 impl<K: Kmer> Error for PathwayError<K> {}
 impl<K: Kmer> std::fmt::Display for PathwayError<K> {
@@ -51,7 +51,7 @@ impl<K: Kmer> std::fmt::Display for PathwayError<K> {
         match self {
             PathwayError::NoPathExists => write!(f, "No path found between the given k-mers"),
             PathwayError::KmerNotFound(kmer) => write!(f, "Kmer not found: {:?}", kmer),
-            PathwayError::UnitigNotMatching(seq, kmer, i) => write!(f, "Expected kmer {:?} at position {} in unitig {}", kmer, i, seq),
+            PathwayError::NodeNotMatching(seq, kmer, i) => write!(f, "Expected kmer {:?} at position {} in unitig {}", kmer, i, seq),
         }
     }
 }
