@@ -7,19 +7,15 @@ use super::Extension;
 use debruijn::{Dir, Kmer};
 
 use ahash::AHashMap;
-use std::{collections::hash_map::Entry, fmt::Debug};
+use std::collections::hash_map::Entry;
+
+pub const MAX_LENGTH: usize = 35;
+pub const MIN_LENGTH: usize = 0;
 
 /// A struct that represents a shortest path extension by adding the shortest path towards a target node.
 #[derive(Copy, Clone)]
 pub struct ShortestPath {
-    target_node: (usize, Dir),
-    length: usize,
-}
-
-impl Debug for ShortestPath {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "SP{:?}", self.target_node)
-    }
+    pub target_node: (usize, Dir),
 }
 
 impl Extension for ShortestPath {
@@ -29,11 +25,8 @@ impl Extension for ShortestPath {
         let extension = get_shortest_path(graph, start_node, end_node).unwrap();
         path.extend(extension);
     }
-    fn next<K: Kmer>(graph: &Graph<K>, path: &Vec<(usize, Dir)>, position: usize) -> Option<Self> {
+    fn get_next_ext<K: Kmer>(graph: &Graph<K>, path: &Vec<(usize, Dir)>, position: usize) -> Option<(Self, usize)> {
         get_next_target_node(graph, path, position).unwrap()
-    }
-    fn length(&self) -> usize {
-        self.length
     }
 }
 
@@ -56,10 +49,10 @@ fn advance_bfs<K: Kmer>(graph: &Graph<K>, queue: &mut Vec<(usize, Dir)>, parents
 /// Note: results corresponds to (start_node ... end_node]
 fn get_shortest_path<K: Kmer>(graph: &Graph<K>, start_node: (usize, Dir), end_node: (usize, Dir)) -> Result<Vec<(usize, Dir)>, PathwayError<K>> {
 
-    // // edge case: start and end are the same
-    // if start_node == end_node {
-    //     return Ok(vec![end_node]);
-    // }
+    // edge case: start and end are the same
+    if start_node == end_node {
+        return Ok(vec![end_node]);
+    }
 
     // initialize the BFS
     let mut parents_left= AHashMap::default();
@@ -124,7 +117,7 @@ fn get_shortest_path<K: Kmer>(graph: &Graph<K>, start_node: (usize, Dir), end_no
 
 // Perform a BFS to find the end of the longest path elongating from the start_position given path.  
 // Return the next target node and the number of nodes in the path.
-pub fn get_next_target_node<K: Kmer>(graph: &Graph<K>, path: &Vec<(usize, Dir)>, start_position: usize) -> Result<Option<ShortestPath>, PathwayError<K>> {
+pub fn get_next_target_node<K: Kmer>(graph: &Graph<K>, path: &Vec<(usize, Dir)>, start_position: usize) -> Result<Option<(ShortestPath, usize)>, PathwayError<K>> {
     let mut node_iter = path.iter();
     let start_node = *node_iter.nth(start_position).unwrap();
     let mut current_node = start_node;
@@ -140,7 +133,7 @@ pub fn get_next_target_node<K: Kmer>(graph: &Graph<K>, path: &Vec<(usize, Dir)>,
 
     // perform the BFS
     let mut depth: usize = 0;
-    while !parents.contains_key(next_node) && depth < 35 {
+    while !parents.contains_key(next_node) && depth < MAX_LENGTH {
         depth += 1;
         // explore the next level of the BFS
         queue = advance_bfs(graph, &mut queue, &mut parents, Dir::Left);    // TODO: handle case with several paths of shortest length
@@ -154,5 +147,5 @@ pub fn get_next_target_node<K: Kmer>(graph: &Graph<K>, path: &Vec<(usize, Dir)>,
         };
     }
     // println!("{} unitigs:\t {:?}\t {:?}", depth, start_node, current_node);
-    Ok(Some(ShortestPath{target_node: current_node, length:depth}))
+    Ok(Some((ShortestPath{target_node: current_node}, depth)))
 }

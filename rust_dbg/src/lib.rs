@@ -10,6 +10,28 @@ pub mod path;
 // pub use ... for re-exports
 
 //####################################################################################
+//                             Utility functions                                    //
+//####################################################################################
+
+pub fn parse_node(s: &str) -> Result<(usize, debruijn::Dir), Box<dyn std::error::Error>> {
+    let (id, dir) = s
+        .strip_prefix('(')
+        .and_then(|s| s.strip_suffix(')'))
+        .and_then(|s| s.split_once(','))
+        .ok_or("Invalid node format")?;
+    
+    let id = id.parse::<usize>()?;
+    
+    let dir = match dir.trim() {
+        "Left" => debruijn::Dir::Left,
+        "Right" => debruijn::Dir::Right,
+        other => return Err(format!("Invalid direction: {}", other).into()),
+    };
+    
+    Ok((id, dir))
+}
+
+//####################################################################################
 //                              Custom errors                                       //
 //####################################################################################
 use std::error::Error;

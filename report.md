@@ -29,7 +29,6 @@ __________________
     - grosso-modo, les scaffolds de Aalf3 sont mappés sur le bon chromosomes de Aalf5, mais on a certaines erreurs
     - pertinence ? 97% des scaffolds sont déjà placés -> mieux vaut utiliser les indications du fasta
 
-__________________
 ## Réunion 20/02
 
 Réflexion sur les métriques associés au dBG:
@@ -73,7 +72,6 @@ __________________
     - Bifrost -> dBG sous forme de gfa, C++ API for graph manipulation
     - ggcat -> juste le set de kmers (peut encore être comprimé avec matchtig et eulertig)
 
-__________________
 ## Réunion 27/02
 - comparer la taille des fichiers permettant / ne permettant pas de reconstruire un haplotype. Dans les deux cas, prendre la version la plus épurée, mais non compressée possible
 - pour mesurer la reconstructibilité des haplotypes: regarder le nb de "breakpoints" le long d'un haplotype
@@ -90,7 +88,6 @@ __________________
 - article sshash: hash pour la query efficiente des kmers. pas d'implémentation rust -> on reste sur du plus basique
 - poursuite code rust: prototype qui construit le graphe et parcourt les haplotypes
 
-__________________
 ## Réunion 21/03
 - mêtriques à regarder:
     - % de breackpoint, fenêtres glissantes
@@ -168,6 +165,10 @@ Pour plus tard: mixer les méthodes. Que se passe t'il en ajoutant des  haplotyp
 _________
 ## Réunion du 28/04
 Pas grand chose. Complexité mémoire mieux que l'encodage des couleurs mais efficacité temporelle à revoir
+
+
+## Réunion 12/05
+Discussion rapport + article + soutenance. Objectif long terme: avoir unarticle publiable pour mi-juillet.
 
 
 ______________
