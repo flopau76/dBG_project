@@ -168,7 +168,7 @@ Pas grand chose. Complexité mémoire mieux que l'encodage des couleurs mais eff
 
 
 ## Réunion 12/05
-Discussion rapport + article + soutenance. Objectif long terme: avoir unarticle publiable pour mi-juillet.
+Discussion rapport + article + soutenance. Objectif long terme: avoir un article publiable pour mi-juillet.
 
 
 ______________
