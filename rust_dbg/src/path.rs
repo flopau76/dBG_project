@@ -19,43 +19,48 @@ trait Extension {
     fn extend_path<K: Kmer>(&self, graph: &Graph<K>, path: &mut Vec<(usize, Dir)>);
 }
 
-#[derive(Copy, Clone)]
+#[derive(Debug, Copy, Clone)]
 /// An enum containing all possible ways to encode a path extension.
 enum MyExtension {
     ShortestPath(ShortestPath),
     NextNode((usize, Dir)),
+    Repetition((u8, u16)),    // (size of pattern, number of nodes)
 }
-impl Debug for MyExtension {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            MyExtension::ShortestPath(sp) => write!(f, "SP{:?}", sp.target_node),
-            MyExtension::NextNode(nn) => write!(f, "NN{:?}", nn),
-        }
-    }
-}
+
 impl MyExtension {
     fn to_string(&self) -> String {
         match self {
             MyExtension::ShortestPath(sp) => format!("SP{:?}", sp.target_node),
             MyExtension::NextNode(nn) => format!("NN{:?}", nn),
+            MyExtension::Repetition((size, count)) => format!("R{}x{}", size, count),
         }
     }
     fn from_string(s: &str) -> Self {
-        // let s = s.split_once(":").unwrap().1.trim();
         if s.starts_with("SP") {
             let target_node = parse_node(s[2..].trim()).unwrap();
             MyExtension::ShortestPath(ShortestPath {target_node})
         } else if s.starts_with("NN") {
             let target_node = parse_node(s[2..].trim()).unwrap();
             MyExtension::NextNode(target_node)
+        } else if s.starts_with("R") {
+            let (size, count) = s[1..].split_once("x").unwrap();
+            let size = size.parse::<u8>().unwrap();
+            let count = count.parse::<u16>().unwrap();
+            MyExtension::Repetition((size, count))
         } else {
-            panic!("Unknown extension type")
+            panic!("Unknown extension type: {}", s);
         }
     }
     fn extend_path<K: Kmer>(&self, graph: &Graph<K>, path: &mut Vec<(usize, Dir)>) {
         match self {
             MyExtension::ShortestPath(sp) => sp.extend_path(graph, path),
             MyExtension::NextNode(nn) => path.push(*nn),
+            MyExtension::Repetition((size, count)) => {
+                for _ in 0..*count {
+                    let prev = path[path.len()-*size as usize];
+                    path.push(prev);
+                }
+            }
         }
     }
 }
@@ -68,7 +73,7 @@ pub struct MixedPath<'a, K: Kmer> {
 }
 
 impl<'a, K: Kmer> MixedPath<'a, K> {
-    /// Encode the path into a MixedPath.
+    /// Encode the list of nodes from a sequence into a MixedPath.
     pub fn encode_seq(graph: &'a Graph<K>, seq: &DnaString) -> Self {
         let nodes = NodeIterator::new(graph, seq).unwrap().collect::<Vec<_>>();
         let start_node = nodes[0];
@@ -193,24 +198,23 @@ mod unit_test {
     }
 
     #[test]
-    fn test_decode_seq() {
+    fn test_code_seq() {
+        // seq -> path -> seq
         let seq = DnaString::from_bytes(SEQ.0);
         let graph = Graph::<Kmer3>::from_seq_serial(&SEQ, STRANDED);
-        let path = MixedPath::encode_seq(&graph, &seq);
 
-        let decoded_seq = path.decode_seq();
+        let decoded_seq = MixedPath::encode_seq(&graph, &seq).decode_seq();
         assert_eq!(seq, decoded_seq);
     }
 
     #[test]
-    fn test_to_from_string() {
+    fn test_path_to_string() {
+        // seq -> path - > string - > path - > seq
         let seq = DnaString::from_bytes(SEQ.0);
         let graph = Graph::<Kmer3>::from_seq_serial(&SEQ, STRANDED);
-        let path = MixedPath::encode_seq(&graph, &seq);
 
-        let path_str = path.to_string();
-        let loaded_path = MixedPath::from_string(&path_str, &graph).unwrap();
-
-        assert_eq!(seq, loaded_path.decode_seq());
+        let path_str = MixedPath::encode_seq(&graph, &seq).to_string();
+        let decoded_seq = MixedPath::from_string(&path_str, &graph).unwrap().decode_seq();
+        assert_eq!(seq, decoded_seq);
     }
 }

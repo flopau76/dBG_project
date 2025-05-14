@@ -17,10 +17,11 @@ use clap::{Parser, Subcommand};
 #[command(author, version, about, long_about = None)]
 struct Cli {
     /// Path to the binary graph file
+    #[arg(short, long)]
     graph: PathBuf,
 
     /// K-mer size
-    #[arg(short)]
+    #[arg(short, default_value_t = 31)]
     k_size: usize,
 
     #[command(subcommand)]
