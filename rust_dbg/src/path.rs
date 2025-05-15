@@ -79,10 +79,21 @@ impl<'a, K: Kmer> MixedPath<'a, K> {
         let start_node = nodes[0];
         let mut extensions = Vec::new();
         let mut position = 0;
+        // TODO: handle repetitions
         while let Some((shortest_path, length)) = ShortestPath::get_next_ext(graph, &nodes, position) {
+            // let mut test_path = vec!(nodes[position]);
+            // shortest_path.extend_path(graph, &mut test_path);
+            // if test_path != nodes[position ..= position+length as usize] {
+            //     eprintln!("Beware: paths not matching");
+            //     assert_eq!(test_path.len(), length as usize + 1, "Both paths do not even have the same length");
+            // }
+
+            // if the shortest path is long enough, we encode its target node (u32 for the whole path)
             if length >= shortest_path::MIN_LENGTH {
                 extensions.push(MyExtension::ShortestPath(shortest_path));
-            } else {
+            }
+            // otherwise, we encode all its nodes directly (2 bits per node)
+            else {
                 extensions.extend(
                     nodes[position+1 .. position+1+length]
                         .iter()
@@ -170,6 +181,7 @@ mod unit_test {
 
     #[test]
     fn test_node_iterator() {
+        // seq -> node_list -> seq
         let graph = Graph::<Kmer3>::from_seq_serial(&SEQ, STRANDED);
         let mut unitig_iter = NodeIterator::new(&graph, &SEQ).unwrap();
 
@@ -180,15 +192,12 @@ mod unit_test {
         let path_seq = graph.sequence_of_path(path.iter());
         let seq = DnaString::from_bytes(SEQ.0);
         assert!(path_seq == seq);
-
-        // println!("Path: {:?}", path);
-        // println!("{:?}", graph.base.sequences);
-        // graph.print();
     }
 
     #[ignore]
     #[test]
     fn test_encode_seq() {
+        // seq -> (node_list) -> path
         let seq = DnaString::from_bytes(SEQ.0);
         let graph = Graph::<Kmer3>::from_seq_serial(&SEQ, STRANDED);
         let path = MixedPath::encode_seq(&graph, &seq);
@@ -199,7 +208,7 @@ mod unit_test {
 
     #[test]
     fn test_code_seq() {
-        // seq -> path -> seq
+        // seq -> (node_list) -> path -> (node_list) -> seq
         let seq = DnaString::from_bytes(SEQ.0);
         let graph = Graph::<Kmer3>::from_seq_serial(&SEQ, STRANDED);
 
@@ -209,12 +218,50 @@ mod unit_test {
 
     #[test]
     fn test_path_to_string() {
-        // seq -> path - > string - > path - > seq
+        // seq -> (node_list) -> path -> string -> path -> (node_list) -> seq
         let seq = DnaString::from_bytes(SEQ.0);
         let graph = Graph::<Kmer3>::from_seq_serial(&SEQ, STRANDED);
 
         let path_str = MixedPath::encode_seq(&graph, &seq).to_string();
         let decoded_seq = MixedPath::from_string(&path_str, &graph).unwrap().decode_seq();
         assert_eq!(seq, decoded_seq);
+    }
+}
+
+
+
+#[cfg(test)]
+mod real_test {
+    use std::path::PathBuf;
+
+    use super::*;
+    use crate::graph::Graph;
+    use crate::fasta_reader::FastaReader;
+    use debruijn::kmer;
+
+    type Kmer31 = kmer::VarIntKmer<u64, kmer::K31>;
+
+    #[test]
+    fn test_node_iterator_real() {
+        // seq -> node_list -> seq
+        let path_graph = PathBuf::from("/home/florence/Documents/dbg_project/data/output/chr1/AalbF5_k31.bin");
+        let graph = Graph::<Kmer31>::load_from_binary(&path_graph).unwrap();
+
+        let path_fasta = PathBuf::from("/home/florence/Documents/dbg_project/data/input/chr1/AalbF5_splitN.fna");
+        let fasta_reader = FastaReader::new(path_fasta).unwrap();
+
+        for record in fasta_reader {
+            println!("Testing record {}", record.header());
+            let seq = record.dna_string();
+            let mut unitig_iter = NodeIterator::new(&graph, &seq).unwrap();
+
+            let mut path = Vec::new();
+            while let Some(node) = unitig_iter.next().unwrap() {
+                path.push(node);
+            }
+            let path_seq = graph.sequence_of_path(path.iter());
+            let path_seq = path_seq.slice(unitig_iter.start_offset, path_seq.len() - unitig_iter.end_offset.unwrap_or(0)).to_owned();
+            assert_eq!(path_seq, seq);
+        }
     }
 }

@@ -78,9 +78,9 @@ done
 # Draft: align reconstruction with input
 #_______________________________________________________________________________
 # mkdir test_align
-# seq 1 10 | while read i; do
-#     # seqkit grep -p "AalbF5#1#chr1_$i" output/chr1/reconstruct_AalbF5_in_1.fna | seqkit replace -w 0 -p $ -r "#reconstruct" -o test_align/AalbF5#1#chr1_$i.fna
-#     # seqkit grep -p "AalbF5#1#chr1_$i" input/chr1/AalbF5_splitN.fna | seqkit replace -w 0 -p $ -r "#input" >> test_align/AalbF5#1#chr1_$i.fna
+# seq 1 6 | while read i; do
+#     seqkit grep -p "AalbF5#1#chr1_$i" output/chr1/decoding_AalbF5_in_1.txt | seqkit replace -w 0 -p $ -r "#reconstruct" -o test_align/AalbF5#1#chr1_$i.fna
+#     seqkit grep -p "AalbF5#1#chr1_$i" input/chr1/AalbF5_splitN.fna | seqkit replace -w 0 -p $ -r "#input" >> test_align/AalbF5#1#chr1_$i.fna
 #     clustalo -i test_align/AalbF5#1#chr1_$i.fna -o test_align/AalbF5#1#chr1_$i.aln --force
-#     seqkit -w 0 seq test_align/AalbF5#1#chr1_$i.aln -o test_align/AalbF5#1#chr1_$i.aln2
+#     seqkit -w 0 seq test_align/AalbF5#1#chr1_$i.aln -o test_align/AalbF5#1#chr1_$i.aln
 # done

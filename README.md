@@ -28,16 +28,18 @@ The core of the project consists in embedding continuous sequences as paths in t
 ```bash
 cargo run -- $PATH_GRAPH -k $K_SIZE encode -i $INPUT_FASTA -o $OUTPUT_TEXT
 ```
+The encoding is composed of a start node, and a list of extensions of the following format:
+- SP(target node): shortest path to the given node
+- NN(next node): 2 bit encoding of the following node to add
+- R(pattern size)x(nb of repetitions): coming soon
+
+> [!NOTE]
+> The encoding is not lossless. For now, when a shortest path is specified, it is garantied that the input path is one of the shortest paths to the target node, but it may not be the only one.
 
 > [!WARNING] 
 > The input fasta may contain several sequences. However, a single sequence must be continuous (no N nor gap symbols).
-
-> [!IMPORTANT] 
-> This operation is under work. For now, it has a dramatic time complexity.
 
 The command `decode` performs the reverse operation, by retrieving a sequence from a path:
 ```bash
 cargo run -- $PATH_GRAPH -k $K_SIZE decode -i $INPUT_TEXT  -o $OUTPUT_FASTA
 ```
-> [!NOTE] 
-> The encoding is not lossless. The reconstructed path may not correspond perfectly to the input.

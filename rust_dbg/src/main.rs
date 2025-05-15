@@ -130,6 +130,7 @@ impl Commands {
                     if buffer.starts_with('>') {
                         // process the previous path, if any
                         if !current_path.is_empty() {
+                            eprintln!("Decoding record {}", current_header);
                             let path = MixedPath::from_string(&current_path, &graph).unwrap();
                             let seq = path.decode_seq();
                             writeln!(output_writer, ">{}", current_header).unwrap();
