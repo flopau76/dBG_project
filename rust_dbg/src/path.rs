@@ -21,8 +21,8 @@ pub const MIN_NB_REPEATS: u16 = 13; // repetition encoded on 24 bits
 
 #[derive(Debug, Copy, Clone)]
 /// An enum containing all possible ways to encode a path extension.
-enum MyExtension {
-    ShortestPath((usize, Dir)),
+pub enum MyExtension {
+    ShortestPath((usize, Dir), usize), // target_node, length. Note: length is not needed, but usefull for stats/graphs
     NextNode((usize, Dir)),
     Repetition((u16, u8)), // nb_repeats, offset (-1)
 }
@@ -30,15 +30,19 @@ enum MyExtension {
 impl MyExtension {
     fn to_string(&self) -> String {
         match self {
-            MyExtension::ShortestPath(target_node) => format!("SP{:?}", target_node),
+            MyExtension::ShortestPath(target_node, length) => {
+                format!("SP:{}:{:?}", length, target_node)
+            }
             MyExtension::NextNode(next_node) => format!("NN{:?}", next_node),
-            MyExtension::Repetition((size, position)) => format!("R:{}x{}", size, position),
+            MyExtension::Repetition((nb_repeats, offset)) => format!("R:{}x{}", nb_repeats, offset),
         }
     }
     fn from_string(s: &str) -> Self {
         if s.starts_with("SP") {
-            let target_node = parse_node(s[2..].trim()).unwrap();
-            MyExtension::ShortestPath(target_node)
+            let (length, target_node) = s[3..].split_once(":").unwrap();
+            let length = length.parse::<usize>().unwrap();
+            let target_node = parse_node(target_node.trim()).unwrap();
+            MyExtension::ShortestPath(target_node, length)
         } else if s.starts_with("NN") {
             let target_node = parse_node(s[2..].trim()).unwrap();
             MyExtension::NextNode(target_node)
@@ -53,7 +57,7 @@ impl MyExtension {
     }
     fn extend_path<K: Kmer>(&self, graph: &Graph<K>, path: &mut Vec<(usize, Dir)>) {
         match self {
-            MyExtension::ShortestPath(target_node) => path.extend(
+            MyExtension::ShortestPath(target_node, _) => path.extend(
                 shortest_path::get_shortest_path(graph, *path.last().unwrap(), *target_node)
                     .unwrap()
                     .iter(),
@@ -71,9 +75,9 @@ impl MyExtension {
 
 /// A struct that represents a path in a de Bruijn graph using a start node and a list of extensions.
 pub struct MixedPath<'a, K: Kmer> {
-    graph: &'a Graph<K>,
-    start_node: (usize, Dir),
-    extensions: Vec<MyExtension>,
+    pub graph: &'a Graph<K>,
+    pub start_node: (usize, Dir),
+    pub extensions: Vec<MyExtension>,
 }
 
 // Return a Vector of (start_position, nb_repeats, offset),
@@ -135,7 +139,7 @@ impl<'a, K: Kmer> MixedPath<'a, K> {
                 }
                 // if the shortest path is long enough, we use it to extend the path
                 if length >= MIN_PATH_LENGTH {
-                    extensions.push(MyExtension::ShortestPath(shortest_path));
+                    extensions.push(MyExtension::ShortestPath(shortest_path, length));
                 }
                 // otherwise, we encode its nodes directly (2 bits per node)
                 else {

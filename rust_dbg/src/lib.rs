@@ -18,7 +18,7 @@ pub fn parse_node(s: &str) -> Result<(usize, debruijn::Dir), Box<dyn std::error:
         .strip_prefix('(')
         .and_then(|s| s.strip_suffix(')'))
         .and_then(|s| s.split_once(','))
-        .ok_or("Invalid node format")?;
+        .ok_or(format!("Invalid node format: {}", s))?;
 
     let id = id.parse::<usize>()?;
 

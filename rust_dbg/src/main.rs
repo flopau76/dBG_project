@@ -1,12 +1,18 @@
 use rust_dbg::fasta_reader::FastaReader;
 use rust_dbg::graph::Graph;
-use rust_dbg::path::{MAX_OFFSET, MAX_PATH_LENGTH, MIN_NB_REPEATS, MIN_PATH_LENGTH, MixedPath};
+use rust_dbg::path::{
+    MAX_OFFSET, MAX_PATH_LENGTH, MIN_NB_REPEATS, MIN_PATH_LENGTH, MixedPath, MyExtension,
+};
 
 use debruijn::{Kmer, kmer};
 
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::PathBuf;
+
+use plotters::prelude::*;
+use std::collections::HashMap;
+use std::error::Error;
 
 use serde::{Deserialize, Serialize};
 
@@ -40,7 +46,13 @@ enum Commands {
         forward_only: bool,
     },
     /// Get some stats about a graph
-    Stats {},
+    StatsG {},
+    /// Get some stats about a path
+    StatsP {
+        /// Path to the file containing the encoded path
+        #[arg(short, long)]
+        input: PathBuf,
+    },
     /// Encode a continuous sequence into a path in the graph
     Encode {
         /// Path to the sequence file (fasta format)
@@ -90,7 +102,7 @@ impl Commands {
                 let duration = start.elapsed();
                 eprintln!("done in {:?}", duration);
             }
-            Commands::Stats {} => {
+            Commands::StatsG {} => {
                 let graph = Graph::<K>::load_from_binary(&path_graph).unwrap();
                 let mut node_length: usize = 0;
                 let mut nb_edges: usize = 0;
@@ -147,18 +159,15 @@ impl Commands {
                 let mut input_reader = BufReader::new(File::open(input).unwrap());
                 let mut output_writer = File::create(output).unwrap();
 
-                let mut current_header = String::new();
-                let mut current_path = String::new();
-                let mut buffer = String::new();
-
                 // skip the file header
-                loop {
+                let mut buffer = String::new();
+                while !buffer.starts_with('>') {
                     buffer.clear();
-                    let bytes_read = input_reader.read_line(&mut buffer).unwrap();
-                    if bytes_read == 0 || buffer.starts_with('>') {
-                        break;
-                    }
+                    input_reader.read_line(&mut buffer).unwrap();
                 }
+                let mut current_header = buffer[1..].trim().to_string();
+                let mut current_path = String::new();
+                buffer.clear();
 
                 while input_reader.read_line(&mut buffer).unwrap() > 0 {
                     if buffer.starts_with('>') {
@@ -187,8 +196,121 @@ impl Commands {
                     writeln!(output_writer, "{}", seq.to_string()).unwrap();
                 }
             }
+            Commands::StatsP { input } => {
+                let graph = Graph::<K>::load_from_binary(path_graph).unwrap();
+                let mut input_reader = BufReader::new(File::open(input).unwrap());
+
+                // skip the file header
+                let mut buffer = String::new();
+                while !buffer.starts_with('>') {
+                    buffer.clear();
+                    input_reader.read_line(&mut buffer).unwrap();
+                }
+                let mut current_header = buffer[1..].trim().to_string();
+                let mut current_path = String::new();
+                buffer.clear();
+
+                let mut length_r = Vec::new();
+                let mut length_sp = Vec::new();
+
+                while input_reader.read_line(&mut buffer).unwrap() > 0 {
+                    if buffer.starts_with('>') {
+                        // process the previous path, if any
+                        if !current_path.is_empty() {
+                            eprintln!("Decoding record {}", current_header);
+                            let path = MixedPath::from_string(&current_path, &graph).unwrap();
+                            for ext in path.extensions {
+                                match ext {
+                                    MyExtension::Repetition((nb_repeats, _offset)) => {
+                                        length_r.push(nb_repeats as usize);
+                                    }
+                                    MyExtension::ShortestPath(_target_node, length) => {
+                                        length_sp.push(length);
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                        // start a new path
+                        current_header = buffer[1..].trim().to_string();
+                        current_path.clear();
+                    } else {
+                        current_path.push_str(&buffer);
+                    }
+                    buffer.clear();
+                }
+
+                // Process the last path in the file
+                if !current_path.is_empty() {
+                    let path = MixedPath::from_string(&current_path, &graph).unwrap();
+                    for ext in path.extensions {
+                        match ext {
+                            MyExtension::Repetition((nb_repeats, _offset)) => {
+                                length_r.push(nb_repeats as usize);
+                            }
+                            MyExtension::ShortestPath(_target_node, length) => {
+                                length_sp.push(length);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+
+                // plot the histogramm of length_sp and length_r
+                make_histo(length_r, "test").unwrap();
+            }
         }
     }
+}
+
+/// Creates a histogram from a vector of usize values and saves it as a PNG file
+///
+/// # Arguments
+/// * `vec` - The input data as a vector of usize values
+/// * `title` - The title for the histogram plot
+///
+/// # Returns
+/// Result indicating success or failure
+pub fn make_histo(vec: Vec<usize>, title: &str) -> Result<(), Box<dyn Error>> {
+    // Create histogram data
+    let mut histogram = HashMap::new();
+    for &value in &vec {
+        *histogram.entry(value).or_insert(0) += 1;
+    }
+
+    // Sort the histogram by key
+    let mut sorted_histogram: Vec<_> = histogram.into_iter().collect();
+    sorted_histogram.sort_by(|a, b| a.0.cmp(&b.0));
+
+    // Prepare data for plotting
+    let x_values: Vec<_> = sorted_histogram.iter().map(|&(k, _)| k).collect();
+    let y_values: Vec<_> = sorted_histogram.iter().map(|&(_, v)| v).collect();
+
+    // Create a new drawing area
+    let root = BitMapBackend::new("histogram.png", (640, 480)).into_drawing_area();
+    root.fill(&WHITE)?;
+
+    // Create a chart
+    let mut chart = ChartBuilder::on(&root)
+        .caption(title, ("sans-serif", 30).into_font())
+        .margin(10)
+        .x_label_area_size(30)
+        .y_label_area_size(30)
+        .build_cartesian_2d(
+            0..x_values.iter().max().unwrap() + 1,
+            0..y_values.iter().max().unwrap() + 1,
+        )?;
+
+    chart.configure_mesh().draw()?;
+
+    // Draw the histogram bars
+    chart.draw_series(
+        Histogram::vertical(&chart)
+            .style(RED.mix(0.5).filled())
+            .data(x_values.iter().zip(y_values.iter()).map(|(&x, &y)| (x, y))),
+    )?;
+
+    Ok(())
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]

@@ -19,3 +19,6 @@ bincode = { version = "^2", features = ["serde"] }
 # parallelisation
 rayon = "1.10"
 chrono = "0.4.41"
+
+# plots
+plotters = "0.3.7"
