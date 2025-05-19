@@ -1,13 +1,12 @@
 use rust_dbg::fasta_reader::FastaReader;
 use rust_dbg::graph::Graph;
-use rust_dbg::path::MixedPath;
+use rust_dbg::path::{MAX_OFFSET, MAX_PATH_LENGTH, MIN_NB_REPEATS, MIN_PATH_LENGTH, MixedPath};
 
 use debruijn::{Kmer, kmer};
 
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::PathBuf;
-use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
@@ -120,6 +119,20 @@ impl Commands {
                 let graph = Graph::<K>::load_from_binary(path_graph).unwrap();
                 let fasta_reader = FastaReader::new(input).unwrap();
                 let mut output_writer = File::create(output).unwrap();
+
+                // write the header
+                let date = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+                writeln!(output_writer, "DATE:\n\t{}", date).unwrap();
+                let git_hash = option_env!("GIT_COMMIT_HASH").unwrap_or("unknown");
+                writeln!(output_writer, "GIT VERSION:\n\t{}", git_hash).unwrap();
+                let command = std::env::args().collect::<Vec<_>>().join(" ");
+                writeln!(output_writer, "COMMAND:\n\t{}", command).unwrap();
+                writeln!(output_writer, "CONSTANTS:").unwrap();
+                writeln!(output_writer, "\tMIN_PATH_LENGTH: {}", MIN_PATH_LENGTH).unwrap();
+                writeln!(output_writer, "\tMAX_PATH_LENGTH: {}", MAX_PATH_LENGTH).unwrap();
+                writeln!(output_writer, "\tMIN_NB_REPEATS: {}", MIN_NB_REPEATS).unwrap();
+                writeln!(output_writer, "\tMAX_OFFSET: {}", MAX_OFFSET).unwrap();
+
                 for record in fasta_reader {
                     eprintln!("Encoding record {}", record.header());
                     let seq = record.dna_string();
@@ -137,6 +150,15 @@ impl Commands {
                 let mut current_header = String::new();
                 let mut current_path = String::new();
                 let mut buffer = String::new();
+
+                // skip the file header
+                loop {
+                    buffer.clear();
+                    let bytes_read = input_reader.read_line(&mut buffer).unwrap();
+                    if bytes_read == 0 || buffer.starts_with('>') {
+                        break;
+                    }
+                }
 
                 while input_reader.read_line(&mut buffer).unwrap() > 0 {
                     if buffer.starts_with('>') {
@@ -178,17 +200,6 @@ impl<const K: usize> kmer::KmerSize for MyKmerSize<K> {
 }
 
 pub fn main() {
-    // Get Git commit hash
-    let output = Command::new("git")
-        .args(["rev-parse", "HEAD"])
-        .output()
-        .unwrap_or_else(|_| panic!("Failed to get Git commit hash"));
-
-    let git_hash = String::from_utf8(output.stdout).unwrap().trim().to_string();
-
-    // Pass it to the compiler
-    println!("cargo:rustc-env=GIT_COMMIT_HASH={}", git_hash);
-
     let cli = Cli::parse();
     let k_size = cli.k_size;
     let path_graph = cli.graph;

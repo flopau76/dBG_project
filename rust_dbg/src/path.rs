@@ -168,15 +168,6 @@ impl<'a, K: Kmer> MixedPath<'a, K> {
     /// Transform the path into a string representation (to save to text file)
     pub fn to_string(&self) -> String {
         let mut result = String::new();
-
-        let git_hash = option_env!("GIT_COMMIT_HASH").unwrap_or("unknown");
-        result.push_str(&format!("Code version: {}\n", git_hash));
-        result.push_str("Constants:\n");
-        result.push_str(&format!("\tMIN_PATH_LENGTH: {}\n", MIN_PATH_LENGTH));
-        result.push_str(&format!("\tMAX_PATH_LENGTH: {}\n", MAX_PATH_LENGTH));
-        result.push_str(&format!("\tMIN_NB_REPEATS: {}\n", MIN_NB_REPEATS));
-        result.push_str(&format!("\tMAX_OFFSET: {}\n", MAX_OFFSET));
-
         result.push_str(&format!("Start node: {:?}", self.start_node));
         for ext in &self.extensions {
             result.push_str(&format!("\n{}", ext.to_string()));
@@ -186,7 +177,7 @@ impl<'a, K: Kmer> MixedPath<'a, K> {
 
     /// Create a path from its string representation (to load from text file)
     pub fn from_string(s: &str, graph: &'a Graph<K>) -> Result<Self, Box<dyn std::error::Error>> {
-        let mut lines = s.lines().skip(6);
+        let mut lines = s.lines();
         let start_node_line = lines.next().ok_or("Missing start node line")?;
         let start_node = parse_node(&start_node_line[12..])?;
 
