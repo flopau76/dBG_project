@@ -125,11 +125,14 @@ impl<'a, K: Kmer> MixedPath<'a, K> {
         while let Some(repetition) = repetitions.pop_front() {
             let target_pos = repetition.0 - 1;
             while current_position < target_pos {
-                let (shortest_path, length) =
+                let (mut shortest_path, mut length) =
                     shortest_path::get_next_target_node(graph, &nodes, current_position)
                         .unwrap()
                         .unwrap();
-                let length = length.min(target_pos - current_position);
+                if current_position + length >= target_pos {
+                    length = target_pos - current_position;
+                    shortest_path = nodes[target_pos];
+                }
                 // if the shortest path is long enough, we use it to extend the path
                 if length >= MIN_PATH_LENGTH {
                     extensions.push(MyExtension::ShortestPath(shortest_path));
@@ -206,7 +209,6 @@ mod unit_test {
 
     const STRANDED: bool = true;
     const SEQ: DnaSlice = DnaSlice(&[2, 2, 2, 1, 1, 1, 1, 2, 2, 2, 0, 0, 0, 0, 0, 1]); // gggccccgggaaaaac
-    const _SHORTEST: DnaSlice = DnaSlice(&[2, 2, 2, 0, 0, 1]); // gggaac
 
     #[test]
     fn test_node_iterator_offset() {
@@ -280,38 +282,12 @@ mod unit_test {
     #[ignore]
     #[test]
     fn print_get_repetitions() {
-        let test = vec![
-            (0, Dir::Left),
-            (0, Dir::Left),
-            (0, Dir::Left),
-            (0, Dir::Left),
-            (0, Dir::Left),
-            (5, Dir::Left),
-            (5, Dir::Left),
-            (5, Dir::Left),
-            (5, Dir::Left),
-            (5, Dir::Left),
-            (0, Dir::Left),
-            (0, Dir::Left),
-            (0, Dir::Left),
-            (0, Dir::Left),
-            (0, Dir::Left),
-            (5, Dir::Left),
-            (5, Dir::Left),
-            (5, Dir::Left),
-            (5, Dir::Left),
-            (5, Dir::Left),
-            (0, Dir::Left),
-            (0, Dir::Left),
-            (0, Dir::Left),
-            (0, Dir::Left),
-            (0, Dir::Left),
-            (5, Dir::Left),
-            (5, Dir::Left),
-            (5, Dir::Left),
-            (5, Dir::Left),
-            (5, Dir::Left),
-        ];
+        let test = vec![(0, Dir::Left); 5]
+            .into_iter()
+            .chain(vec![(5, Dir::Left); 5])
+            .chain(vec![(0, Dir::Left); 5])
+            .chain(vec![(5, Dir::Left); 5])
+            .collect::<Vec<_>>();
         let rep = get_repetitions(&test);
         println!("Repetitions:");
         for (start, nb_repeats, offset) in rep.iter() {
