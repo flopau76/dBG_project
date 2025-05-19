@@ -1,14 +1,14 @@
 //! To parse fasta files and get the DNA records.
 
-use std::io::{BufReader, BufRead, Result, Seek, SeekFrom};
 use std::fs::File;
+use std::io::{BufRead, BufReader, Result, Seek, SeekFrom};
 use std::path::Path;
 
 use debruijn::dna_string::DnaString;
 
 use rayon::prelude::*;
-use std::sync::Arc;
 use std::cell::RefCell;
+use std::sync::Arc;
 
 /// Buffered reader for fasta files.
 pub struct FastaReader {
@@ -24,7 +24,7 @@ impl FastaReader {
 
         let file = File::open(&path)?;
         let mut buffer = BufReader::new(file);
-        
+
         // Iterate once over the file to make the index
         let mut index = Vec::new();
         let mut pos: usize = 0;
@@ -38,15 +38,19 @@ impl FastaReader {
         // Rewind the buffer to the beginning
         buffer.seek(SeekFrom::Start(0))?;
 
-        Ok(Self{buffer, index, path})
+        Ok(Self {
+            buffer,
+            index,
+            path,
+        })
     }
-    
+
     /// Reads the next record in the file.
     fn next(&mut self) -> Option<DnaRecord> {
         // Skip until the next header
         match self.buffer.skip_until(b'>') {
             Ok(0) => return None, // EOF
-            Ok(_) => {}, 
+            Ok(_) => {}
             Err(_) => return None, // Error
         }
         // Read the header line
@@ -61,23 +65,22 @@ impl FastaReader {
         let mut sequence = Vec::new();
         self.buffer.read_until(b'>', &mut sequence).unwrap();
         if let Some(last) = sequence.last() {
-            if *last == b'>' {sequence.pop();}
+            if *last == b'>' {
+                sequence.pop();
+            }
         }
         sequence.retain(|&c| c != b'\n');
 
         // Reposition the buffer at the start of the next seq header
         self.buffer.seek_relative(-1).unwrap();
 
-        Some(DnaRecord {
-            header,
-            sequence,
-        })
+        Some(DnaRecord { header, sequence })
     }
 
     /// Transforms the reader into a parallel iterator.
     pub fn into_par_iter(self) -> impl ParallelIterator<Item = DnaRecord> {
         let path = self.path;
-        let index = self.index[0..(self.index.len()-1)].to_vec();
+        let index = self.index[0..(self.index.len() - 1)].to_vec();
 
         index.into_par_iter().map_init(
             // Initialize a thread-local file handle
@@ -90,29 +93,31 @@ impl FastaReader {
                 // Get the file reader and position it at the start of the record
                 let mut reader = reader.borrow_mut();
                 reader.seek(SeekFrom::Start(start as u64)).unwrap();
-                
+
                 // Read the header line
                 let mut header = String::new();
                 reader.read_line(&mut header).unwrap();
                 let header = header.trim_end().to_string();
-                
+
                 // Read the sequence
                 let mut sequence = Vec::new();
                 reader.read_until(b'>', &mut sequence).unwrap();
                 if let Some(last) = sequence.last() {
-                    if *last == b'>' {sequence.pop();}
+                    if *last == b'>' {
+                        sequence.pop();
+                    }
                 }
                 sequence.retain(|&c| c != b'\n');
-                                
+
                 DnaRecord { header, sequence }
-            }
+            },
         )
     }
 }
 
 impl Iterator for FastaReader {
     type Item = DnaRecord;
-    
+
     fn next(&mut self) -> Option<Self::Item> {
         self.next()
     }

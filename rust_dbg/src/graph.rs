@@ -1,26 +1,26 @@
 //! To create graphs from fasta/unitig files
 
-use debruijn::{Kmer, Vmer, Exts, Dir};
-use debruijn::graph::{BaseGraph, DebruijnGraph};
 use debruijn::compression;
+use debruijn::graph::{BaseGraph, DebruijnGraph};
+use debruijn::{Dir, Exts, Kmer, Vmer};
 
 use ahash::AHashSet;
 use std::ops::{Deref, DerefMut};
 
-use serde::{Serialize, Deserialize};
-use bincode::serde::{encode_into_std_write, decode_from_std_read};
+use bincode::serde::{decode_from_std_read, encode_into_std_write};
+use serde::{Deserialize, Serialize};
 
-use std::io::{Write, BufReader};
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use std::fs::File;
+use std::io::{BufReader, Write};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 use crate::fasta_reader::FastaReader;
 
 /// Wrapper around the DebruijnGraph from the debruijn crate.
 #[derive(Serialize, Deserialize, Debug)]
-pub struct Graph<K: Kmer> (DebruijnGraph<K, ()>);
+pub struct Graph<K: Kmer>(DebruijnGraph<K, ()>);
 
 impl<K: Kmer> Deref for Graph<K> {
     type Target = DebruijnGraph<K, ()>;
@@ -38,11 +38,15 @@ impl<K: Kmer> Graph<K> {
     /// Search a kmer at one side of the nodes
     pub fn search_kmer(&self, kmer: K, side: Dir) -> Option<(usize, Dir)> {
         match side {
-            Dir::Left => self.find_link(kmer, Dir::Right).map(|(id, dir, _)| (id, dir)),
-            Dir::Right => self.find_link(kmer, Dir::Left).map(|(id, dir, _)| (id, dir.flip()))
+            Dir::Left => self
+                .find_link(kmer, Dir::Right)
+                .map(|(id, dir, _)| (id, dir)),
+            Dir::Right => self
+                .find_link(kmer, Dir::Left)
+                .map(|(id, dir, _)| (id, dir.flip())),
         }
     }
-    
+
     /// Search a kmer within the nodes, by iterating over all the graph. Returns ((node_id, dir), offset) where offset is counted from the given side.
     pub fn search_kmer_offset(&self, kmer: K, side: Dir) -> Option<((usize, Dir), usize)> {
         // search first at the given extremity
@@ -54,7 +58,7 @@ impl<K: Kmer> Graph<K> {
         for node_id in 0..self.len() {
             for (offset, k) in self.get_node_kmer(node_id).into_iter().enumerate() {
                 if k == kmer {
-                     let offset = match side {
+                    let offset = match side {
                         Dir::Left => offset,
                         Dir::Right => self.get_node(node_id).len() - K::k() - offset,
                     };
@@ -100,7 +104,7 @@ impl<K: Kmer> Graph<K> {
     fn fix_exts_serial(&mut self) {
         // Get edges wich need update
         let updates: Vec<(usize, Exts)> = (0..self.len())
-            .filter_map(|i| {self.get_new_exts(i)})
+            .filter_map(|i| self.get_new_exts(i))
             .collect();
 
         // Apply all the updates to the original graph
@@ -108,13 +112,21 @@ impl<K: Kmer> Graph<K> {
             self.base.exts[node_id] = new_exts;
         }
     }
-    
+
     /// Create a graph from a sequence of kmers. (For debugging mainly)
     pub fn from_seq_serial(seq: &impl Vmer, stranded: bool) -> Self {
-        let can = |k: K| {if stranded {k} else {k.min_rc()}};
-        let unique_kmers = seq.iter_kmers().map(|k| can(k)).collect::<AHashSet<K>>().into_iter().map(|k| (k, ())).collect::<Vec<_>>();
+        let can = |k: K| {
+            if stranded { k } else { k.min_rc() }
+        };
+        let unique_kmers = seq
+            .iter_kmers()
+            .map(|k| can(k))
+            .collect::<AHashSet<K>>()
+            .into_iter()
+            .map(|k| (k, ()))
+            .collect::<Vec<_>>();
         let compression = compression::ScmapCompress::<()>::new();
-        let graph = compression::compress_kmers_no_exts(stranded, &compression,  &unique_kmers);
+        let graph = compression::compress_kmers_no_exts(stranded, &compression, &unique_kmers);
         Self(graph.finish_serial())
     }
 
@@ -139,12 +151,13 @@ impl<K: Kmer> Graph<K> {
 }
 
 // Parallel construction
-impl<K: Kmer+Send+Sync> Graph<K> {
+impl<K: Kmer + Send + Sync> Graph<K> {
     /// Same as [Graph::fix_exts_serial] but with some parallelisation.
     fn fix_exts(&mut self) {
         // Get edges wich need update
-        let updates: Vec<(usize, Exts)> = (0..self.len()).into_par_iter()
-            .filter_map(|i| {self.get_new_exts(i)})
+        let updates: Vec<(usize, Exts)> = (0..self.len())
+            .into_par_iter()
+            .filter_map(|i| self.get_new_exts(i))
             .collect();
 
         // Apply all the updates to the original graph
@@ -179,7 +192,10 @@ impl<K: Kmer+Send+Sync> Graph<K> {
 // Dump and load from binary
 impl<K: Kmer + Serialize> Graph<K> {
     /// Write the graph as a binary
-    pub fn save_to_binary(&self, mut file_writer: Box<dyn Write>) -> Result<(), Box <dyn std::error::Error>> {
+    pub fn save_to_binary(
+        &self,
+        mut file_writer: Box<dyn Write>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let config = bincode::config::standard();
         let _ = encode_into_std_write(self, &mut file_writer, config)?;
         Ok(())
@@ -187,7 +203,7 @@ impl<K: Kmer + Serialize> Graph<K> {
 }
 impl<K: Kmer + for<'a> Deserialize<'a>> Graph<K> {
     /// Load the graph from a binary file.
-    pub fn load_from_binary(path_bin: &Path) -> Result<Self, Box <dyn std::error::Error>> {
+    pub fn load_from_binary(path_bin: &Path) -> Result<Self, Box<dyn std::error::Error>> {
         let mut f = BufReader::new(File::open(path_bin).unwrap());
         let config = bincode::config::standard();
         let graph = decode_from_std_read(&mut f, config)?;
@@ -201,12 +217,12 @@ mod unit_test {
 
     use super::Graph;
 
-    use debruijn::kmer::Kmer3;
     use debruijn::DnaSlice;
+    use debruijn::kmer::Kmer3;
 
-    const SEQ: DnaSlice = DnaSlice(&[2,2,2,1,1,1,1,2,2,2,0,0,0,0,0,1]);    // gggccccgggaaaaac
-    const STRANDED : bool = true;
-    const PATH_UNITIGS : &str = "../data/input/test.fna";
+    const SEQ: DnaSlice = DnaSlice(&[2, 2, 2, 1, 1, 1, 1, 2, 2, 2, 0, 0, 0, 0, 0, 1]); // gggccccgggaaaaac
+    const STRANDED: bool = true;
+    const PATH_UNITIGS: &str = "../data/input/test.fna";
 
     #[test]
     #[ignore]

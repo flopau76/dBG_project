@@ -1,63 +1,67 @@
 //! Defines how to encode a path in a debruijn Graph. Pri
- 
-use debruijn::{dna_string::DnaString, Dir, Kmer};
 
-use crate::parse_node;
+use debruijn::{Dir, Kmer, dna_string::DnaString};
+
+use self::node_iterator::NodeIterator;
 use crate::graph::Graph;
-use self::{node_iterator::NodeIterator, shortest_path::ShortestPath};
+use crate::parse_node;
 
+use std::collections::VecDeque;
 use std::fmt::Debug;
 
 pub mod node_iterator;
-pub mod shortest_path;
+mod shortest_path;
 
-/// Some information about how to extend a path in a given graph
-trait Extension {
-    /// Get the next extension and its length, given the full path and the current node in the path (note: path[position] is the last encoded node)
-    fn get_next_ext<K: Kmer>(graph: &Graph<K>, path: &Vec<(usize, Dir)>, position: usize) -> Option<(Self, usize)> where Self: Sized;
-    /// Extend the current path given the extension
-    fn extend_path<K: Kmer>(&self, graph: &Graph<K>, path: &mut Vec<(usize, Dir)>);
-}
+// for shortest path
+pub const MAX_PATH_LENGTH: usize = 60;
+pub const MIN_PATH_LENGTH: usize = 17; // path encoded on 32 bits
+// for repetitions
+pub const MAX_OFFSET: u8 = 255;
+pub const MIN_NB_REPEATS: u16 = 13; // repetition encoded on 24 bits
 
 #[derive(Debug, Copy, Clone)]
 /// An enum containing all possible ways to encode a path extension.
 enum MyExtension {
-    ShortestPath(ShortestPath),
+    ShortestPath((usize, Dir)),
     NextNode((usize, Dir)),
-    Repetition((u8, u16)),    // (size of pattern, number of nodes)
+    Repetition((u16, u8)), // nb_repeats, offset (-1)
 }
 
 impl MyExtension {
     fn to_string(&self) -> String {
         match self {
-            MyExtension::ShortestPath(sp) => format!("SP{:?}", sp.target_node),
-            MyExtension::NextNode(nn) => format!("NN{:?}", nn),
-            MyExtension::Repetition((size, count)) => format!("R{}x{}", size, count),
+            MyExtension::ShortestPath(target_node) => format!("SP{:?}", target_node),
+            MyExtension::NextNode(next_node) => format!("NN{:?}", next_node),
+            MyExtension::Repetition((size, position)) => format!("R:{}x{}", size, position),
         }
     }
     fn from_string(s: &str) -> Self {
         if s.starts_with("SP") {
             let target_node = parse_node(s[2..].trim()).unwrap();
-            MyExtension::ShortestPath(ShortestPath {target_node})
+            MyExtension::ShortestPath(target_node)
         } else if s.starts_with("NN") {
             let target_node = parse_node(s[2..].trim()).unwrap();
             MyExtension::NextNode(target_node)
-        } else if s.starts_with("R") {
-            let (size, count) = s[1..].split_once("x").unwrap();
-            let size = size.parse::<u8>().unwrap();
-            let count = count.parse::<u16>().unwrap();
-            MyExtension::Repetition((size, count))
+        } else if s.starts_with("R:") {
+            let (size, count) = s[2..].split_once("x").unwrap();
+            let nb_repeats = size.parse::<u16>().unwrap();
+            let offset = count.parse::<u8>().unwrap();
+            MyExtension::Repetition((nb_repeats, offset))
         } else {
             panic!("Unknown extension type: {}", s);
         }
     }
     fn extend_path<K: Kmer>(&self, graph: &Graph<K>, path: &mut Vec<(usize, Dir)>) {
         match self {
-            MyExtension::ShortestPath(sp) => sp.extend_path(graph, path),
+            MyExtension::ShortestPath(target_node) => path.extend(
+                shortest_path::get_shortest_path(graph, *path.last().unwrap(), *target_node)
+                    .unwrap()
+                    .iter(),
+            ),
             MyExtension::NextNode(nn) => path.push(*nn),
-            MyExtension::Repetition((size, count)) => {
-                for _ in 0..*count {
-                    let prev = path[path.len()-*size as usize];
+            MyExtension::Repetition((nb_repeats, offset)) => {
+                for _ in 0..*nb_repeats {
+                    let prev = path[path.len() - 1 - *offset as usize];
                     path.push(prev);
                 }
             }
@@ -72,42 +76,86 @@ pub struct MixedPath<'a, K: Kmer> {
     extensions: Vec<MyExtension>,
 }
 
+// Return a Vector of (start_position, nb_repeats, offset),
+// so that path[start_position .. start_position + nb_repeats] = path[start_position -1 - offset .. start_position + nb_repeats - 1- offset]
+fn get_repetitions(path: &Vec<(usize, Dir)>) -> VecDeque<(usize, u16, u8)> {
+    let mut repetitions = VecDeque::new();
+    let mut current_pos = 1;
+
+    while current_pos < path.len() {
+        let mut best_nb_repeats = 0;
+        let mut best_offset = 0;
+
+        // find the longest repetition in the sliding window
+        for offset in 0..=(MAX_OFFSET as usize).min(current_pos - 1) {
+            let mut nb_repeats = 0;
+            while path[current_pos - 1 - offset + nb_repeats] == path[current_pos + nb_repeats] {
+                nb_repeats += 1;
+                if current_pos + nb_repeats >= path.len() {
+                    break;
+                }
+            }
+            if nb_repeats > best_nb_repeats {
+                best_nb_repeats = nb_repeats;
+                best_offset = offset;
+            }
+        }
+        // if the repetition is long enough, add it to the list
+        if best_nb_repeats >= MIN_NB_REPEATS as usize {
+            repetitions.push_back((current_pos, best_nb_repeats as u16, best_offset as u8));
+            current_pos += best_nb_repeats;
+        } else {
+            current_pos += 1;
+        }
+    }
+    repetitions
+}
+
 impl<'a, K: Kmer> MixedPath<'a, K> {
     /// Encode the list of nodes from a sequence into a MixedPath.
     pub fn encode_seq(graph: &'a Graph<K>, seq: &DnaString) -> Self {
         let nodes = NodeIterator::new(graph, seq).unwrap().collect::<Vec<_>>();
         let start_node = nodes[0];
         let mut extensions = Vec::new();
-        let mut position = 0;
-        // TODO: handle repetitions
-        while let Some((shortest_path, length)) = ShortestPath::get_next_ext(graph, &nodes, position) {
-            // let mut test_path = vec!(nodes[position]);
-            // shortest_path.extend_path(graph, &mut test_path);
-            // if test_path != nodes[position ..= position+length as usize] {
-            //     eprintln!("Beware: paths not matching");
-            //     assert_eq!(test_path.len(), length as usize + 1, "Both paths do not even have the same length");
-            // }
 
-            // if the shortest path is long enough, we encode its target node (u32 for the whole path)
-            if length >= shortest_path::MIN_LENGTH {
-                extensions.push(MyExtension::ShortestPath(shortest_path));
+        let mut current_position = 0;
+        let mut repetitions = get_repetitions(&nodes);
+        repetitions.push_back((nodes.len(), 0, 0)); // add a sentinel to avoid adding the last part separately
+
+        while let Some(repetition) = repetitions.pop_front() {
+            let target_pos = repetition.0 - 1;
+            while current_position < target_pos {
+                let (shortest_path, length) =
+                    shortest_path::get_next_target_node(graph, &nodes, current_position)
+                        .unwrap()
+                        .unwrap();
+                let length = length.min(target_pos - current_position);
+                // if the shortest path is long enough, we use it to extend the path
+                if length >= MIN_PATH_LENGTH {
+                    extensions.push(MyExtension::ShortestPath(shortest_path));
+                }
+                // otherwise, we encode its nodes directly (2 bits per node)
+                else {
+                    extensions.extend(
+                        nodes[current_position + 1..current_position + 1 + length]
+                            .iter()
+                            .map(|&node| MyExtension::NextNode(node)),
+                    );
+                }
+                current_position += length as usize;
             }
-            // otherwise, we encode all its nodes directly (2 bits per node)
-            else {
-                extensions.extend(
-                    nodes[position+1 .. position+1+length]
-                        .iter()
-                        .map(|&node| MyExtension::NextNode(node))
-                );
-            }
-            position += length as usize;
+            // add the repetition
+            extensions.push(MyExtension::Repetition((repetition.1, repetition.2)));
+            current_position += repetition.1 as usize;
         }
+        extensions.pop(); // remove the sentinel
         MixedPath {
             graph,
             start_node,
             extensions,
         }
     }
+
     /// Decode the path into a DnaString.
     pub fn decode_seq(&self) -> DnaString {
         let mut path = vec![self.start_node];
@@ -120,6 +168,15 @@ impl<'a, K: Kmer> MixedPath<'a, K> {
     /// Transform the path into a string representation (to save to text file)
     pub fn to_string(&self) -> String {
         let mut result = String::new();
+
+        let git_hash = option_env!("GIT_COMMIT_HASH").unwrap_or("unknown");
+        result.push_str(&format!("Code version: {}\n", git_hash));
+        result.push_str("Constants:\n");
+        result.push_str(&format!("\tMIN_PATH_LENGTH: {}\n", MIN_PATH_LENGTH));
+        result.push_str(&format!("\tMAX_PATH_LENGTH: {}\n", MAX_PATH_LENGTH));
+        result.push_str(&format!("\tMIN_NB_REPEATS: {}\n", MIN_NB_REPEATS));
+        result.push_str(&format!("\tMAX_OFFSET: {}\n", MAX_OFFSET));
+
         result.push_str(&format!("Start node: {:?}", self.start_node));
         for ext in &self.extensions {
             result.push_str(&format!("\n{}", ext.to_string()));
@@ -129,7 +186,7 @@ impl<'a, K: Kmer> MixedPath<'a, K> {
 
     /// Create a path from its string representation (to load from text file)
     pub fn from_string(s: &str, graph: &'a Graph<K>) -> Result<Self, Box<dyn std::error::Error>> {
-        let mut lines = s.lines();
+        let mut lines = s.lines().skip(6);
         let start_node_line = lines.next().ok_or("Missing start node line")?;
         let start_node = parse_node(&start_node_line[12..])?;
 
@@ -156,9 +213,9 @@ mod unit_test {
     use debruijn::kmer::Kmer3;
     use debruijn::{DnaSlice, dna_string::DnaString};
 
-    const STRANDED : bool = true;
-    const SEQ: DnaSlice = DnaSlice(&[2,2,2,1,1,1,1,2,2,2,0,0,0,0,0,1]);    // gggccccgggaaaaac
-    const _SHORTEST: DnaSlice = DnaSlice(&[2,2,2,0,0,1]); // gggaac
+    const STRANDED: bool = true;
+    const SEQ: DnaSlice = DnaSlice(&[2, 2, 2, 1, 1, 1, 1, 2, 2, 2, 0, 0, 0, 0, 0, 1]); // gggccccgggaaaaac
+    const _SHORTEST: DnaSlice = DnaSlice(&[2, 2, 2, 0, 0, 1]); // gggaac
 
     #[test]
     fn test_node_iterator_offset() {
@@ -196,7 +253,7 @@ mod unit_test {
 
     #[ignore]
     #[test]
-    fn test_encode_seq() {
+    fn print_encode_seq() {
         // seq -> (node_list) -> path
         let seq = DnaString::from_bytes(SEQ.0);
         let graph = Graph::<Kmer3>::from_seq_serial(&SEQ, STRANDED);
@@ -223,45 +280,51 @@ mod unit_test {
         let graph = Graph::<Kmer3>::from_seq_serial(&SEQ, STRANDED);
 
         let path_str = MixedPath::encode_seq(&graph, &seq).to_string();
-        let decoded_seq = MixedPath::from_string(&path_str, &graph).unwrap().decode_seq();
+        let decoded_seq = MixedPath::from_string(&path_str, &graph)
+            .unwrap()
+            .decode_seq();
         assert_eq!(seq, decoded_seq);
     }
-}
 
-
-
-#[cfg(test)]
-mod real_test {
-    use std::path::PathBuf;
-
-    use super::*;
-    use crate::graph::Graph;
-    use crate::fasta_reader::FastaReader;
-    use debruijn::kmer;
-
-    type Kmer31 = kmer::VarIntKmer<u64, kmer::K31>;
-
+    #[ignore]
     #[test]
-    fn test_node_iterator_real() {
-        // seq -> node_list -> seq
-        let path_graph = PathBuf::from("/home/florence/Documents/dbg_project/data/output/chr1/AalbF5_k31.bin");
-        let graph = Graph::<Kmer31>::load_from_binary(&path_graph).unwrap();
-
-        let path_fasta = PathBuf::from("/home/florence/Documents/dbg_project/data/input/chr1/AalbF5_splitN.fna");
-        let fasta_reader = FastaReader::new(path_fasta).unwrap();
-
-        for record in fasta_reader {
-            println!("Testing record {}", record.header());
-            let seq = record.dna_string();
-            let mut unitig_iter = NodeIterator::new(&graph, &seq).unwrap();
-
-            let mut path = Vec::new();
-            while let Some(node) = unitig_iter.next().unwrap() {
-                path.push(node);
-            }
-            let path_seq = graph.sequence_of_path(path.iter());
-            let path_seq = path_seq.slice(unitig_iter.start_offset, path_seq.len() - unitig_iter.end_offset.unwrap_or(0)).to_owned();
-            assert_eq!(path_seq, seq);
+    fn print_get_repetitions() {
+        let test = vec![
+            (0, Dir::Left),
+            (0, Dir::Left),
+            (0, Dir::Left),
+            (0, Dir::Left),
+            (0, Dir::Left),
+            (5, Dir::Left),
+            (5, Dir::Left),
+            (5, Dir::Left),
+            (5, Dir::Left),
+            (5, Dir::Left),
+            (0, Dir::Left),
+            (0, Dir::Left),
+            (0, Dir::Left),
+            (0, Dir::Left),
+            (0, Dir::Left),
+            (5, Dir::Left),
+            (5, Dir::Left),
+            (5, Dir::Left),
+            (5, Dir::Left),
+            (5, Dir::Left),
+            (0, Dir::Left),
+            (0, Dir::Left),
+            (0, Dir::Left),
+            (0, Dir::Left),
+            (0, Dir::Left),
+            (5, Dir::Left),
+            (5, Dir::Left),
+            (5, Dir::Left),
+            (5, Dir::Left),
+            (5, Dir::Left),
+        ];
+        let rep = get_repetitions(&test);
+        println!("Repetitions:");
+        for (start, nb_repeats, offset) in rep.iter() {
+            println!("{} {} {}", start, nb_repeats, offset);
         }
     }
 }

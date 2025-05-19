@@ -3,9 +3,8 @@
 use crate::PathwayError;
 use crate::graph::Graph;
 
-use debruijn::{Dir, Mer, Vmer, Kmer, KmerIter};
 use debruijn::dna_string::DnaString;
-
+use debruijn::{Dir, Kmer, KmerIter, Mer, Vmer};
 
 /// Iterator over a dna sequence, following the nodes in the graph. This will raise an error if the sequence from kmer_iter is not present in the graph.
 pub struct NodeIterator<'a, K: Kmer, D: Vmer> {
@@ -19,7 +18,7 @@ pub struct NodeIterator<'a, K: Kmer, D: Vmer> {
 impl<'a, K: Kmer, D: Vmer> NodeIterator<'a, K, D> {
     pub fn new(graph: &'a Graph<K>, sequence: &'a D) -> Result<Self, PathwayError<K>> {
         let kmer_iter = sequence.iter_kmers::<K>();
-        let mut node_iter = Self{
+        let mut node_iter = Self {
             graph,
             kmer_iter,
             next_node: None,
@@ -28,7 +27,10 @@ impl<'a, K: Kmer, D: Vmer> NodeIterator<'a, K, D> {
         };
 
         // initialise the iterator by looking for the first kmer
-        let mut kmer = node_iter.kmer_iter.next().expect("sequence shorter than kmer size");
+        let mut kmer = node_iter
+            .kmer_iter
+            .next()
+            .expect("sequence shorter than kmer size");
         let node = graph.search_kmer(kmer, Dir::Left);
 
         // first kmer corresponds to the start of a node
@@ -40,7 +42,7 @@ impl<'a, K: Kmer, D: Vmer> NodeIterator<'a, K, D> {
                 Dir::Left => graph.get_node(node.0).sequence(),
                 Dir::Right => graph.get_node(node.0).sequence().rc(),
             };
-        
+
             // advance the kmer iterator to the end of this node
             for position in K::k()..node_seq.len() {
                 let kmer = node_iter.kmer_iter.next();
@@ -49,8 +51,12 @@ impl<'a, K: Kmer, D: Vmer> NodeIterator<'a, K, D> {
                     return Ok(node_iter);
                 };
                 let kmer = kmer.unwrap();
-                if node_seq.get(position) != kmer.get(K::k()-1) {
-                    return Err(PathwayError::NodeNotMatching(node_seq.to_owned(), kmer, position));
+                if node_seq.get(position) != kmer.get(K::k() - 1) {
+                    return Err(PathwayError::NodeNotMatching(
+                        node_seq.to_owned(),
+                        kmer,
+                        position,
+                    ));
                 }
             }
         }
@@ -61,7 +67,10 @@ impl<'a, K: Kmer, D: Vmer> NodeIterator<'a, K, D> {
             let mut skipped_bases = DnaString::new();
             while node.is_none() {
                 skipped_bases.push(kmer.get(0));
-                kmer = node_iter.kmer_iter.next().expect("sequence contains neither begining nor end of a node");
+                kmer = node_iter
+                    .kmer_iter
+                    .next()
+                    .expect("sequence contains neither begining nor end of a node");
                 node = graph.search_kmer(kmer, Dir::Right);
             }
             node_iter.next_node = node;
@@ -71,11 +80,13 @@ impl<'a, K: Kmer, D: Vmer> NodeIterator<'a, K, D> {
                 Dir::Right => graph.get_node(node.0).sequence().rc(),
             };
             node_iter.start_offset = node_seq.len() - skipped_bases.len() - K::k();
-            let expected_seq = node_seq.slice(node_iter.start_offset, node_seq.len()-K::k()).to_owned();
+            let expected_seq = node_seq
+                .slice(node_iter.start_offset, node_seq.len() - K::k())
+                .to_owned();
             if expected_seq != skipped_bases {
                 println!("skipped bases: {:?}", skipped_bases);
                 println!("expected bases: {:?}", expected_seq);
-                return Err(PathwayError::NodeNotMatching(expected_seq, kmer, 0));   // todo: proper values here
+                return Err(PathwayError::NodeNotMatching(expected_seq, kmer, 0)); // todo: proper values here
             }
         }
         Ok(node_iter)
@@ -100,11 +111,14 @@ impl<'a, K: Kmer, D: Vmer> NodeIterator<'a, K, D> {
             Some(kmer) => kmer,
             None => {
                 self.next_node = None;
-                return Ok(())
-            },
+                return Ok(());
+            }
         };
         // look for the kmer at the beginning of the unitigs
-        let node = self.graph.search_kmer(kmer, Dir::Left).ok_or(PathwayError::KmerNotFound(kmer))?;
+        let node = self
+            .graph
+            .search_kmer(kmer, Dir::Left)
+            .ok_or(PathwayError::KmerNotFound(kmer))?;
         self.next_node = Some(node);
         // get the sequence of this node
         let expected_seq = match node.1 {
@@ -119,12 +133,16 @@ impl<'a, K: Kmer, D: Vmer> NodeIterator<'a, K, D> {
             let kmer = match self.kmer_iter.next() {
                 Some(kmer) => kmer,
                 None => {
-                    self.end_offset = Some(expected_seq.len()-idx);
-                    break
-                },
+                    self.end_offset = Some(expected_seq.len() - idx);
+                    break;
+                }
             };
-            if expected_base != kmer.get(K::k()-1) {
-                return Err(PathwayError::NodeNotMatching(expected_seq.to_owned(), kmer, 1));
+            if expected_base != kmer.get(K::k() - 1) {
+                return Err(PathwayError::NodeNotMatching(
+                    expected_seq.to_owned(),
+                    kmer,
+                    1,
+                ));
             }
         }
         Ok(())

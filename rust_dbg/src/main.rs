@@ -2,27 +2,28 @@ use rust_dbg::fasta_reader::FastaReader;
 use rust_dbg::graph::Graph;
 use rust_dbg::path::MixedPath;
 
-use debruijn::{kmer, Kmer};
+use debruijn::{Kmer, kmer};
 
 use std::fs::File;
-use std::io::{BufWriter, Write, BufReader, BufRead};
+use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::PathBuf;
+use std::process::Command;
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
-use std::time::Instant;
 use clap::{Parser, Subcommand};
+use std::time::Instant;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
+    /// K-mer size
+    #[arg(short)]
+    k_size: usize,
+
     /// Path to the binary graph file
     #[arg(short, long)]
     graph: PathBuf,
-
-    /// K-mer size
-    #[arg(short, default_value_t = 31)]
-    k_size: usize,
 
     #[command(subcommand)]
     command: Commands,
@@ -40,7 +41,7 @@ enum Commands {
         forward_only: bool,
     },
     /// Get some stats about a graph
-    Stats { },
+    Stats {},
     /// Encode a continuous sequence into a path in the graph
     Encode {
         /// Path to the sequence file (fasta format)
@@ -60,42 +61,53 @@ enum Commands {
         /// Path to the output file (reconstructed sequence in fasta format)
         #[arg(short, long)]
         output: PathBuf,
-    }
+    },
 }
 
 impl Commands {
-    fn run<K: Kmer + Send + Sync + Serialize + for<'a> Deserialize<'a>>(&self, path_graph: &PathBuf) {
+    fn run<K: Kmer + Send + Sync + Serialize + for<'a> Deserialize<'a>>(
+        &self,
+        path_graph: &PathBuf,
+    ) {
         match self {
-            Commands::Build { input, forward_only } => {
+            Commands::Build {
+                input,
+                forward_only,
+            } => {
                 eprint!("Creating graph (parallel)... ");
                 std::io::stderr().flush().unwrap();
                 let start = Instant::now();
                 let graph = Graph::<K>::from_unitigs(input, *forward_only);
                 let duration = start.elapsed();
                 eprintln!("done in {:?}", duration);
-        
+
                 eprint!("Saving graph... ");
                 std::io::stderr().flush().unwrap();
                 let start = Instant::now();
-        
+
                 let f = BufWriter::new(File::create(path_graph).unwrap());
                 graph.save_to_binary(Box::new(f)).unwrap();
-        
+
                 let duration = start.elapsed();
                 eprintln!("done in {:?}", duration);
-            },
-            Commands::Stats{} => {
+            }
+            Commands::Stats {} => {
                 let graph = Graph::<K>::load_from_binary(&path_graph).unwrap();
                 let mut node_length: usize = 0;
                 let mut nb_edges: usize = 0;
-                let mut edges_histo: [[u32; 5]; 5] = [[0;5];5];
+                let mut edges_histo: [[u32; 5]; 5] = [[0; 5]; 5];
                 for node in graph.iter_nodes() {
                     node_length += node.len();
                     let exts = node.exts();
-                    nb_edges +=  (exts.num_exts_l() + exts.num_exts_r()) as usize;
+                    nb_edges += (exts.num_exts_l() + exts.num_exts_r()) as usize;
                     edges_histo[exts.num_exts_l() as usize][exts.num_exts_r() as usize] += 1;
                 }
-                eprintln!("Graph contains:\n   - {} nodes\n   - {} edges\nAverage node length: {}", graph.len(), nb_edges/2, node_length/graph.len());
+                eprintln!(
+                    "Graph contains:\n   - {} nodes\n   - {} edges\nAverage node length: {}",
+                    graph.len(),
+                    nb_edges / 2,
+                    node_length / graph.len()
+                );
                 eprintln!("Edges histogram:");
                 for i in 0..5 {
                     for j in 0..5 {
@@ -103,8 +115,8 @@ impl Commands {
                     }
                     eprintln!();
                 }
-            },
-            Commands::Encode {input, output} => {
+            }
+            Commands::Encode { input, output } => {
                 let graph = Graph::<K>::load_from_binary(path_graph).unwrap();
                 let fasta_reader = FastaReader::new(input).unwrap();
                 let mut output_writer = File::create(output).unwrap();
@@ -121,11 +133,11 @@ impl Commands {
                 let graph = Graph::<K>::load_from_binary(path_graph).unwrap();
                 let mut input_reader = BufReader::new(File::open(input).unwrap());
                 let mut output_writer = File::create(output).unwrap();
-            
+
                 let mut current_header = String::new();
                 let mut current_path = String::new();
                 let mut buffer = String::new();
-            
+
                 while input_reader.read_line(&mut buffer).unwrap() > 0 {
                     if buffer.starts_with('>') {
                         // process the previous path, if any
@@ -144,7 +156,7 @@ impl Commands {
                     }
                     buffer.clear();
                 }
-            
+
                 // Process the last path in the file
                 if !current_path.is_empty() {
                     let path = MixedPath::from_string(&current_path, &graph).unwrap();
@@ -157,7 +169,6 @@ impl Commands {
     }
 }
 
-
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
 struct MyKmerSize<const K: usize>;
 impl<const K: usize> kmer::KmerSize for MyKmerSize<K> {
@@ -167,6 +178,17 @@ impl<const K: usize> kmer::KmerSize for MyKmerSize<K> {
 }
 
 pub fn main() {
+    // Get Git commit hash
+    let output = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .unwrap_or_else(|_| panic!("Failed to get Git commit hash"));
+
+    let git_hash = String::from_utf8(output.stdout).unwrap().trim().to_string();
+
+    // Pass it to the compiler
+    println!("cargo:rustc-env=GIT_COMMIT_HASH={}", git_hash);
+
     let cli = Cli::parse();
     let k_size = cli.k_size;
     let path_graph = cli.graph;
@@ -189,10 +211,10 @@ pub fn main() {
     }
     // without generic constants, we have to match kmer_size one by one
     kmer_size_match!(
-        1 2 3 4 => u8, 
+        1 2 3 4 => u8,
         5 6 7 8 => u16,
         9 10 11 12 13 14 15 16 => u32,
         17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 => u64,
-        // ... 
+        // ...
     );
 }

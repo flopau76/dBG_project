@@ -214,7 +214,7 @@ checksum = "d0a5c400df2834b80a4c3327b3aad3a4c4cd4de0629063962b03235697506a28"
 [[package]]
 name = "debruijn"
 version = "0.3.4"
-source = "git+https://github.com/flopau76/rust-debruijn.git?branch=master#9666697c8356f2e8cbc332f9b4a79a15ba27db86"
+source = "git+https://github.com/flopau76/rust-debruijn.git?branch=master#136ed0ca13b7f9316f3a9db5f6760d739c8eadb2"
 dependencies = [
  "bit-set",
  "boomphf",
