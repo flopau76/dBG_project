@@ -1,5 +1,6 @@
 use rust_dbg::fasta_reader::FastaReader;
 use rust_dbg::graph::Graph;
+// use rust_dbg::make_histo;
 use rust_dbg::path::{
     MAX_OFFSET, MAX_PATH_LENGTH, MIN_NB_REPEATS, MIN_PATH_LENGTH, MixedPath, MyExtension,
 };
@@ -9,15 +10,11 @@ use debruijn::{Kmer, kmer};
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::PathBuf;
-
-use plotters::prelude::*;
-use std::collections::HashMap;
-use std::error::Error;
+use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 
 use clap::{Parser, Subcommand};
-use std::time::Instant;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -47,12 +44,6 @@ enum Commands {
     },
     /// Get some stats about a graph
     StatsG {},
-    /// Get some stats about a path
-    StatsP {
-        /// Path to the file containing the encoded path
-        #[arg(short, long)]
-        input: PathBuf,
-    },
     /// Encode a continuous sequence into a path in the graph
     Encode {
         /// Path to the sequence file (fasta format)
@@ -72,6 +63,12 @@ enum Commands {
         /// Path to the output file (reconstructed sequence in fasta format)
         #[arg(short, long)]
         output: PathBuf,
+    },
+    /// Get some stats about the encoding of a path
+    StatsP {
+        /// Path to the file containing the encoded path
+        #[arg(short, long)]
+        input: PathBuf,
     },
 }
 
@@ -104,9 +101,11 @@ impl Commands {
             }
             Commands::StatsG {} => {
                 let graph = Graph::<K>::load_from_binary(&path_graph).unwrap();
+
                 let mut node_length: usize = 0;
                 let mut nb_edges: usize = 0;
                 let mut edges_histo: [[u32; 5]; 5] = [[0; 5]; 5];
+
                 for node in graph.iter_nodes() {
                     node_length += node.len();
                     let exts = node.exts();
@@ -145,13 +144,12 @@ impl Commands {
                 writeln!(output_writer, "\tMIN_NB_REPEATS: {}", MIN_NB_REPEATS).unwrap();
                 writeln!(output_writer, "\tMAX_OFFSET: {}", MAX_OFFSET).unwrap();
 
+                // encode the records
                 for record in fasta_reader {
                     eprintln!("Encoding record {}", record.header());
-                    let seq = record.dna_string();
-                    let path = MixedPath::encode_seq(&graph, &seq);
-                    let path_str = path.to_string();
+                    let path = MixedPath::encode_seq(&graph, &record.dna_string());
                     writeln!(output_writer, ">{}", record.header()).unwrap();
-                    writeln!(output_writer, "{}", path_str).unwrap();
+                    writeln!(output_writer, "{}", path).unwrap();
                 }
             }
             Commands::Decode { input, output } => {
@@ -159,37 +157,20 @@ impl Commands {
                 let mut input_reader = BufReader::new(File::open(input).unwrap());
                 let mut output_writer = File::create(output).unwrap();
 
-                // skip the file header
-                let mut buffer = String::new();
-                while !buffer.starts_with('>') {
-                    buffer.clear();
-                    input_reader.read_line(&mut buffer).unwrap();
-                }
-                let mut current_header = buffer[1..].trim().to_string();
-                let mut current_path = String::new();
-                buffer.clear();
-
-                while input_reader.read_line(&mut buffer).unwrap() > 0 {
-                    if buffer.starts_with('>') {
-                        // process the previous path, if any
-                        if !current_path.is_empty() {
-                            eprintln!("Decoding record {}", current_header);
-                            let path = MixedPath::from_string(&current_path, &graph).unwrap();
-                            let seq = path.decode_seq();
-                            writeln!(output_writer, ">{}", current_header).unwrap();
-                            writeln!(output_writer, "{}", seq.to_string()).unwrap();
-                        }
-                        // start a new path
-                        current_header = buffer[1..].trim().to_string();
-                        current_path.clear();
-                    } else {
-                        current_path.push_str(&buffer);
+                // go to the first '>'
+                input_reader.skip_until(b'>').unwrap();
+                let mut current_header = String::new();
+                while input_reader.read_line(&mut current_header).unwrap() > 0 {
+                    // read the path
+                    let mut buffer = Vec::new();
+                    input_reader.read_until(b'>', &mut buffer).unwrap();
+                    if buffer.last() == Some(&b'>') {
+                        buffer.pop();
                     }
-                    buffer.clear();
-                }
+                    let current_path = String::from_utf8_lossy(&buffer);
 
-                // Process the last path in the file
-                if !current_path.is_empty() {
+                    // proccess the path
+                    eprintln!("Decoding record {}", current_header);
                     let path = MixedPath::from_string(&current_path, &graph).unwrap();
                     let seq = path.decode_seq();
                     writeln!(output_writer, ">{}", current_header).unwrap();
@@ -199,49 +180,23 @@ impl Commands {
             Commands::StatsP { input } => {
                 let graph = Graph::<K>::load_from_binary(path_graph).unwrap();
                 let mut input_reader = BufReader::new(File::open(input).unwrap());
-
-                // skip the file header
-                let mut buffer = String::new();
-                while !buffer.starts_with('>') {
-                    buffer.clear();
-                    input_reader.read_line(&mut buffer).unwrap();
-                }
-                let mut current_header = buffer[1..].trim().to_string();
-                let mut current_path = String::new();
-                buffer.clear();
-
                 let mut length_r = Vec::new();
                 let mut length_sp = Vec::new();
+                let mut length_nn = 0;
 
-                while input_reader.read_line(&mut buffer).unwrap() > 0 {
-                    if buffer.starts_with('>') {
-                        // process the previous path, if any
-                        if !current_path.is_empty() {
-                            eprintln!("Decoding record {}", current_header);
-                            let path = MixedPath::from_string(&current_path, &graph).unwrap();
-                            for ext in path.extensions {
-                                match ext {
-                                    MyExtension::Repetition((nb_repeats, _offset)) => {
-                                        length_r.push(nb_repeats as usize);
-                                    }
-                                    MyExtension::ShortestPath(_target_node, length) => {
-                                        length_sp.push(length);
-                                    }
-                                    _ => {}
-                                }
-                            }
-                        }
-                        // start a new path
-                        current_header = buffer[1..].trim().to_string();
-                        current_path.clear();
-                    } else {
-                        current_path.push_str(&buffer);
+                // go to the first '>'
+                input_reader.skip_until(b'>').unwrap();
+                let mut current_header = String::new();
+                while input_reader.read_line(&mut current_header).unwrap() > 0 {
+                    // read the path
+                    let mut buffer = Vec::new();
+                    input_reader.read_until(b'>', &mut buffer).unwrap();
+                    if buffer.last() == Some(&b'>') {
+                        buffer.pop();
                     }
-                    buffer.clear();
-                }
+                    let current_path = String::from_utf8_lossy(&buffer);
 
-                // Process the last path in the file
-                if !current_path.is_empty() {
+                    // proccess the path
                     let path = MixedPath::from_string(&current_path, &graph).unwrap();
                     for ext in path.extensions {
                         match ext {
@@ -251,66 +206,80 @@ impl Commands {
                             MyExtension::ShortestPath(_target_node, length) => {
                                 length_sp.push(length);
                             }
-                            _ => {}
+                            MyExtension::NextNode(_) => {
+                                length_nn += 1;
+                            }
                         }
                     }
                 }
+                // print the stats
+                const NN_COST: usize = 2;
+                const SP_COST: usize = 32;
+                const R_COST: usize = 24;
+
+                let total_nodes =
+                    length_nn + length_sp.iter().sum::<usize>() + length_r.iter().sum::<usize>();
+                let total_cost =
+                    NN_COST * length_nn + SP_COST * length_sp.len() + R_COST * length_r.len();
+
+                eprintln!("\n       Method | Number of encoded nodes | Memory cost");
+                eprintln!("--------------|-------------------------|-----------------");
+                eprintln!(
+                    "    Next node | {:>14}  ({:.1}%) | {:>11} bits ({:.1}%)",
+                    format_int(length_nn),
+                    length_nn as f64 / total_nodes as f64 * 100.0,
+                    format_int(2 * length_nn),
+                    (NN_COST * length_nn) as f64 / total_cost as f64 * 100.0
+                );
+                eprintln!(
+                    "Shortest path | {:>14}  ({:.1}%) | {:>11} bits ({:.1}%)",
+                    format_int(length_sp.iter().sum::<usize>()),
+                    length_sp.iter().sum::<usize>() as f64 / total_nodes as f64 * 100.0,
+                    format_int(32 * length_sp.len()),
+                    (SP_COST * length_sp.len()) as f64 / total_cost as f64 * 100.0
+                );
+                eprintln!(
+                    "   Repetition | {:>14}  ({:.1}%) | {:>11} bits ({:.1}%)",
+                    format_int(length_r.iter().sum::<usize>()),
+                    length_r.iter().sum::<usize>() as f64 / total_nodes as f64 * 100.0,
+                    format_int(24 * length_r.len()),
+                    (R_COST * length_r.len()) as f64 / total_cost as f64 * 100.0
+                );
+                eprintln!(
+                    "        Total | {:>14}  (100%)  | {:>11} bits (100%)",
+                    format_int(total_nodes),
+                    format_int(total_cost),
+                );
 
                 // plot the histogramm of length_sp and length_r
-                make_histo(length_r, "test").unwrap();
+                // make_histo(
+                //     length_sp,
+                //     "test_sp",
+                //     Some(0),
+                //     Some(MAX_PATH_LENGTH + 1),
+                //     None,
+                // )
+                // .unwrap();
+                // make_histo(length_r, "test_r", None, Some(400), None).unwrap();
             }
         }
     }
 }
 
-/// Creates a histogram from a vector of usize values and saves it as a PNG file
-///
-/// # Arguments
-/// * `vec` - The input data as a vector of usize values
-/// * `title` - The title for the histogram plot
-///
-/// # Returns
-/// Result indicating success or failure
-pub fn make_histo(vec: Vec<usize>, title: &str) -> Result<(), Box<dyn Error>> {
-    // Create histogram data
-    let mut histogram = HashMap::new();
-    for &value in &vec {
-        *histogram.entry(value).or_insert(0) += 1;
+// Helper function to format numbers with commas
+fn format_int(n: usize) -> String {
+    let s = n.to_string();
+    let mut result = String::new();
+    let mut chars = s.chars().rev().peekable();
+
+    while let Some(c) = chars.next() {
+        result.push(c);
+        if chars.peek().is_some() && result.len() % 4 == 3 {
+            result.push(',');
+        }
     }
 
-    // Sort the histogram by key
-    let mut sorted_histogram: Vec<_> = histogram.into_iter().collect();
-    sorted_histogram.sort_by(|a, b| a.0.cmp(&b.0));
-
-    // Prepare data for plotting
-    let x_values: Vec<_> = sorted_histogram.iter().map(|&(k, _)| k).collect();
-    let y_values: Vec<_> = sorted_histogram.iter().map(|&(_, v)| v).collect();
-
-    // Create a new drawing area
-    let root = BitMapBackend::new("histogram.png", (640, 480)).into_drawing_area();
-    root.fill(&WHITE)?;
-
-    // Create a chart
-    let mut chart = ChartBuilder::on(&root)
-        .caption(title, ("sans-serif", 30).into_font())
-        .margin(10)
-        .x_label_area_size(30)
-        .y_label_area_size(30)
-        .build_cartesian_2d(
-            0..x_values.iter().max().unwrap() + 1,
-            0..y_values.iter().max().unwrap() + 1,
-        )?;
-
-    chart.configure_mesh().draw()?;
-
-    // Draw the histogram bars
-    chart.draw_series(
-        Histogram::vertical(&chart)
-            .style(RED.mix(0.5).filled())
-            .data(x_values.iter().zip(y_values.iter()).map(|(&x, &y)| (x, y))),
-    )?;
-
-    Ok(())
+    result.chars().rev().collect()
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
@@ -343,6 +312,8 @@ pub fn main() {
         };
     }
     // without generic constants, we have to match kmer_size one by one
+    // this is uggly and dramatically increases compilation time
+    // The only workaround would be to modify the debruijn crate
     kmer_size_match!(
         1 2 3 4 => u8,
         5 6 7 8 => u16,

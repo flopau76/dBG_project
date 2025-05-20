@@ -170,13 +170,15 @@ Pas grand chose. Complexité mémoire mieux que l'encodage des couleurs mais eff
 ## Réunion 12/05
 Discussion rapport + article + soutenance. Objectif long terme: avoir un article publiable pour mi-juillet.
 
+## Réunion 20/05
+- Formalisation: compression apportée par chaque type d'encodage; poids des chemins, comparés au poids du graphe
+- Rapport (overleaf ?)
+- Passage à l'échelle: graphes plus grands, sur le cluster. voir avec Francesco / wiki seqbio
 
-______________
-TODO:
-- efficacité: de manière générale, get_checkpoinyts est bcp trop lent. remplacer get_kmer_offset lorsqu'on initialise un NodeIterator
-- correction: pourquoi la reconstruction n'est pas parfaite ?
-- stats: coût encodage + comparaison couleurs
-
+Plus tard:
+- Heatmap: quel encodage est le plus intéressant le long d'un génome. 
+- Shortest path et unicité du chemin. Comment encoder les bulles ?
+(ajouter les répétitions sur le main)
 
 ## Comparaison crates rust
 #### Ragnar Groot: packed-seq, ptr-hash, simd-minimizers

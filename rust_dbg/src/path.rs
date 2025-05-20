@@ -7,7 +7,7 @@ use crate::graph::Graph;
 use crate::parse_node;
 
 use std::collections::VecDeque;
-use std::fmt::Debug;
+use std::fmt::Display;
 
 pub mod node_iterator;
 mod shortest_path;
@@ -19,10 +19,10 @@ pub const MIN_PATH_LENGTH: usize = 17; // path encoded on 32 bits
 pub const MAX_OFFSET: u8 = 255;
 pub const MIN_NB_REPEATS: u16 = 13; // repetition encoded on 24 bits
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Copy, Clone)]
 /// An enum containing all possible ways to encode a path extension.
 pub enum MyExtension {
-    ShortestPath((usize, Dir), usize), // target_node, length. Note: length is not needed, but usefull for stats/graphs
+    ShortestPath((usize, Dir), usize), // target_node, length. Note: not necessary to encode length, but usefull for stats
     NextNode((usize, Dir)),
     Repetition((u16, u8)), // nb_repeats, offset (-1)
 }
@@ -73,9 +73,15 @@ impl MyExtension {
     }
 }
 
+impl Display for MyExtension {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.to_string())
+    }
+}
+
 /// A struct that represents a path in a de Bruijn graph using a start node and a list of extensions.
 pub struct MixedPath<'a, K: Kmer> {
-    pub graph: &'a Graph<K>,
+    graph: &'a Graph<K>,
     pub start_node: (usize, Dir),
     pub extensions: Vec<MyExtension>,
 }
@@ -173,7 +179,7 @@ impl<'a, K: Kmer> MixedPath<'a, K> {
     }
 
     /// Transform the path into a string representation (to save to text file)
-    pub fn to_string(&self) -> String {
+    fn to_string(&self) -> String {
         let mut result = String::new();
         result.push_str(&format!("Start node: {:?}", self.start_node));
         for ext in &self.extensions {
@@ -185,8 +191,13 @@ impl<'a, K: Kmer> MixedPath<'a, K> {
     /// Create a path from its string representation (to load from text file)
     pub fn from_string(s: &str, graph: &'a Graph<K>) -> Result<Self, Box<dyn std::error::Error>> {
         let mut lines = s.lines();
-        let start_node_line = lines.next().ok_or("Missing start node line")?;
-        let start_node = parse_node(&start_node_line[12..])?;
+
+        let start_node = lines
+            .next()
+            .unwrap()
+            .strip_prefix("Start node: ")
+            .ok_or("Wrong format: missing start node")?;
+        let start_node = parse_node(&start_node)?;
 
         let mut extensions = Vec::new();
         for line in lines {
@@ -199,6 +210,12 @@ impl<'a, K: Kmer> MixedPath<'a, K> {
             start_node,
             extensions,
         })
+    }
+}
+
+impl<K: Kmer> Display for MixedPath<'_, K> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.to_string())
     }
 }
 
@@ -256,7 +273,7 @@ mod unit_test {
         let graph = Graph::<Kmer3>::from_seq_serial(&SEQ, STRANDED);
         let path = MixedPath::encode_seq(&graph, &seq);
         for ext in path.extensions.iter() {
-            println!("{:?}", ext);
+            println!("{}", ext);
         }
     }
 
