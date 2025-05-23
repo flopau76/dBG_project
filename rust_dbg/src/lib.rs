@@ -15,6 +15,7 @@ pub mod path;
 use debruijn::Kmer;
 use debruijn::dna_string::DnaString;
 use std::error::Error;
+use std::io::Write;
 
 /// Custom error type for pathway search operations
 #[derive(Debug)]
@@ -42,6 +43,7 @@ impl<K: Kmer> std::fmt::Display for PathwayError<K> {
 //                             Utility functions                                    //
 //####################################################################################
 
+/// Parses a string representing a node in the format "(id, direction)"
 pub fn parse_node(s: &str) -> Result<(usize, debruijn::Dir), Box<dyn std::error::Error>> {
     let (id, dir) = s
         .strip_prefix('(')
@@ -58,6 +60,24 @@ pub fn parse_node(s: &str) -> Result<(usize, debruijn::Dir), Box<dyn std::error:
     };
 
     Ok((id, dir))
+}
+
+/// Removes the previous line and print a new progress bar
+pub fn print_progress_bar(current: usize, total: usize) {
+    let bar_width = 40;
+    let progress = current as f32 / total as f32;
+    let filled = (progress * bar_width as f32).round() as usize;
+    let empty = bar_width - filled;
+    let bar = format!(
+        "[{}{}] {}/{} ({:.0}%)",
+        "■".repeat(filled),
+        " ".repeat(empty),
+        current,
+        total,
+        progress * 100.0
+    );
+    eprint!("\r{}", bar); // carriage return to overwrite the current line
+    std::io::stderr().flush().unwrap();
 }
 
 //####################################################################################

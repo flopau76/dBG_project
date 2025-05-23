@@ -1,0 +1,15 @@
+redaction rapport
+
+encodage graph:
+- que faire des bubbles + pb unicité plus court chemin
+
+passage à l'échelle:
+- voir avec Francesco pour test avec d'autres séquences, sur le cluster
+
+espace mémoire graphe:
+- stocker juste les unitigs, pas les edges et les 2 hashmaps
+- remplacer BoomHashMap par NoKeyBoomHashMap ?
+
+debruijn crate:
+- régler le problème de compilation
+    -> virer la méthode statique k() du trait Kmer + réécrire une bonne partie du code ?

@@ -1,6 +1,12 @@
 #!/bin/bash
 
 #_______________________________________________________________________________
+# Download sequences with edirect from NCBI
+#_______________________________________________________________________________
+
+# cat accession_ids.txt | efetch -db nucleotide -format fasta > genomes.fasta
+
+#_______________________________________________________________________________
 # Download sequences with seqdd
 #_______________________________________________________________________________
 
@@ -46,19 +52,19 @@ done
 # Split the sequences by hardmasked regions
 #_______________________________________________________________________________
 
-echo "Splitting sequences by hardmasked regions..."
+# echo "Splitting sequences by hardmasked regions..."
 
-seq 1 3 | while read i; do
-    seqkit seq input/chr$i/AalbF5.fna.gz -w 0 | \
-        perl -pe "s/N+/\n>AalbF5#1#chr$i\n/g" | \
-        seqkit rename -1 | \
-        seqkit seq -m 31  -o input/chr$i/AalbF5_splitN.fna.gz
+# seq 1 3 | while read i; do
+#     seqkit seq input/chr$i/AalbF5.fna.gz -w 0 | \
+#         perl -pe "s/N+/\n>AalbF5#1#chr$i\n/g" | \
+#         seqkit rename -1 | \
+#         seqkit seq -m 31  -o input/chr$i/AalbF5_splitN.fna.gz
 
-    seqkit seq input/chr$i/AalbF3.fna.gz -w 0 | \
-        perl -pe "s/N+/\n>AalbF5#1#chr$i\n/g" | \
-        seqkit rename -1 | \
-        seqkit seq -m 31  -o input/chr$i/AalbF3_splitN.fna.gz
-done
+#     seqkit seq input/chr$i/AalbF3.fna.gz -w 0 | \
+#         perl -pe "s/N+/\n>AalbF5#1#chr$i\n/g" | \
+#         seqkit rename -1 | \
+#         seqkit seq -m 31  -o input/chr$i/AalbF3_splitN.fna.gz
+# done
 
 #_______________________________________________________________________________
 # Run GGCAT

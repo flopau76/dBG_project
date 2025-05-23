@@ -1,9 +1,9 @@
 use rust_dbg::fasta_reader::FastaReader;
 use rust_dbg::graph::Graph;
-// use rust_dbg::make_histo;
 use rust_dbg::path::{
     MAX_OFFSET, MAX_PATH_LENGTH, MIN_NB_REPEATS, MIN_PATH_LENGTH, MixedPath, MyExtension,
 };
+use rust_dbg::print_progress_bar;
 
 use debruijn::{Kmer, kmer};
 
@@ -147,9 +147,18 @@ impl Commands {
                 // encode the records
                 for record in fasta_reader {
                     eprintln!("Encoding record {}", record.header());
-                    let path = MixedPath::encode_seq(&graph, &record.dna_string());
-                    writeln!(output_writer, ">{}", record.header()).unwrap();
-                    writeln!(output_writer, "{}", path).unwrap();
+                    let dna_strings = record.dna_strings();
+                    let mut current = 0;
+                    let total = dna_strings.len();
+                    for dna_string in dna_strings {
+                        print_progress_bar(current, total);
+                        current += 1;
+                        let path = MixedPath::encode_seq(&graph, &dna_string);
+                        writeln!(output_writer, ">{}_{}", record.header(), current).unwrap();
+                        writeln!(output_writer, "{}", path).unwrap();
+                    }
+                    print_progress_bar(current, total);
+                    eprintln!();
                 }
             }
             Commands::Decode { input, output } => {

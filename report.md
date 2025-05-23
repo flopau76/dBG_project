@@ -159,7 +159,7 @@ Prochaine étape: fouille de donnée.
 - histogramme de nb de nucléotides par bout de chemin
 - histogramme du ratio nb de breackpoints / coût d'encodage
 - affichage le long du chromosome
-- caractériser les bouts de chemins répétés
+- caractériser les bouts de chemins répétés. possibilité d'avoir niveaux de répétition ?
 Pour plus tard: mixer les méthodes. Que se passe t'il en ajoutant des  haplotypes ? Gain d'encodage en mémorisant un "chemin de référence" et en stockant les variations par rapport à ce chemin.
 
 _________

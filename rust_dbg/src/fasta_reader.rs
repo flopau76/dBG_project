@@ -80,7 +80,7 @@ impl FastaReader {
     /// Transforms the reader into a parallel iterator.
     pub fn into_par_iter(self) -> impl ParallelIterator<Item = DnaRecord> {
         let path = self.path;
-        let index = self.index[0..(self.index.len() - 1)].to_vec();
+        let index = self.index;
 
         index.into_par_iter().map_init(
             // Initialize a thread-local file handle
@@ -155,5 +155,13 @@ impl DnaRecord {
     /// Returns the sequence of the record as a DnaString. Note: non-acgt char will be converted to 'A'.
     pub fn dna_string(&self) -> DnaString {
         DnaString::from_acgt_bytes(&self.sequence)
+    }
+    /// Returns a list of DnaString, separated by 'N' in the sequence.
+    pub fn dna_strings(&self) -> Vec<DnaString> {
+        self.sequence
+            .split(|&c| c == b'N')
+            .filter(|chunk| !chunk.is_empty())
+            .map(DnaString::from_acgt_bytes)
+            .collect()
     }
 }
