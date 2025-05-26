@@ -4,10 +4,10 @@ use debruijn::compression;
 use debruijn::graph::{BaseGraph, DebruijnGraph};
 use debruijn::{Dir, Exts, Kmer, Vmer};
 
-use ahash::AHashSet;
+use std::collections::HashSet;
 use std::ops::{Deref, DerefMut};
 
-use bincode::serde::{decode_from_std_read, encode_into_std_write};
+use bincode::{deserialize_from, serialize_into};
 use serde::{Deserialize, Serialize};
 
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
@@ -116,12 +116,16 @@ impl<K: Kmer> Graph<K> {
     /// Create a graph from a sequence of kmers. (For debugging mainly)
     pub fn from_seq_serial(seq: &impl Vmer, stranded: bool) -> Self {
         let can = |k: K| {
-            if stranded { k } else { k.min_rc() }
+            if stranded {
+                k
+            } else {
+                k.min_rc()
+            }
         };
         let unique_kmers = seq
             .iter_kmers()
             .map(|k| can(k))
-            .collect::<AHashSet<K>>()
+            .collect::<HashSet<K>>()
             .into_iter()
             .map(|k| (k, ()))
             .collect::<Vec<_>>();
@@ -190,23 +194,27 @@ impl<K: Kmer + Send + Sync> Graph<K> {
 }
 
 // Dump and load from binary
+
 impl<K: Kmer + Serialize> Graph<K> {
     /// Write the graph as a binary
     pub fn save_to_binary(
         &self,
         mut file_writer: Box<dyn Write>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let config = bincode::config::standard();
-        let _ = encode_into_std_write(self, &mut file_writer, config)?;
+        // Using bincode 1.3's serialize_into function
+        serialize_into(&mut file_writer, self)?;
         Ok(())
     }
 }
+
 impl<K: Kmer + for<'a> Deserialize<'a>> Graph<K> {
     /// Load the graph from a binary file.
     pub fn load_from_binary(path_bin: &Path) -> Result<Self, Box<dyn std::error::Error>> {
-        let mut f = BufReader::new(File::open(path_bin).unwrap());
-        let config = bincode::config::standard();
-        let graph = decode_from_std_read(&mut f, config)?;
+        let file = File::open(path_bin)?;
+        let reader = BufReader::new(file);
+
+        // Using bincode 1.3's deserialize_from function
+        let graph = deserialize_from(reader)?;
         Ok(graph)
     }
 }
@@ -217,8 +225,8 @@ mod unit_test {
 
     use super::Graph;
 
-    use debruijn::DnaSlice;
     use debruijn::kmer::Kmer3;
+    use debruijn::DnaSlice;
 
     const SEQ: DnaSlice = DnaSlice(&[2, 2, 2, 1, 1, 1, 1, 2, 2, 2, 0, 0, 0, 0, 0, 1]); // gggccccgggaaaaac
     const STRANDED: bool = true;

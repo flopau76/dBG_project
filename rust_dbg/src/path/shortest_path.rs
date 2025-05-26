@@ -1,19 +1,19 @@
 //! Path finding algorithms for de Bruijn graphs
 
 use super::MAX_PATH_LENGTH;
-use crate::PathwayError;
 use crate::graph::Graph;
+use crate::PathwayError;
 
 use debruijn::{Dir, Kmer};
 
-use ahash::{AHashMap, AHashSet};
 use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet};
 
 // Advances the bfs by one depth and returns the new frontier set. Side indicates which end of the double-ended BFS is elongated.
 fn advance_bfs_parents<K: Kmer>(
     graph: &Graph<K>,
     queue: &mut Vec<(usize, Dir)>,
-    parents: &mut AHashMap<(usize, Dir), (usize, Dir)>,
+    parents: &mut HashMap<(usize, Dir), (usize, Dir)>,
     side: Dir,
 ) -> Vec<(usize, Dir)> {
     let mut next_queue = Vec::new();
@@ -45,8 +45,8 @@ pub fn get_shortest_path<K: Kmer>(
     }
 
     // initialize the BFS
-    let mut parents_left = AHashMap::default();
-    let mut parents_right = AHashMap::default();
+    let mut parents_left = HashMap::default();
+    let mut parents_right = HashMap::default();
     let mut queue_left = Vec::new();
     let mut queue_right = Vec::new();
     parents_left.insert(start_node, start_node);
@@ -114,7 +114,7 @@ pub fn get_shortest_path<K: Kmer>(
 fn advance_bfs_distances<K: Kmer>(
     graph: &Graph<K>,
     queue: &mut Vec<(usize, Dir)>,
-    distances: &mut AHashMap<(usize, Dir), usize>,
+    distances: &mut HashMap<(usize, Dir), usize>,
     side: Dir,
     current_dist: usize,
 ) -> Vec<(usize, Dir)> {
@@ -148,7 +148,7 @@ pub fn get_next_target_node<K: Kmer>(
 
     // look for duplicates in the path: a shortest path cannot pass through the same node twice
     let mut end_position = std::cmp::min(start_position + MAX_PATH_LENGTH, path.len() - 1);
-    let mut seen = AHashSet::new();
+    let mut seen = HashSet::new();
     for pos in start_position..=end_position {
         if seen.contains(&path[pos]) {
             end_position = pos - 1;
@@ -158,10 +158,10 @@ pub fn get_next_target_node<K: Kmer>(
     }
 
     // init BFS
-    let mut distances_left = AHashMap::from([(path[start_position], 0)]);
+    let mut distances_left = HashMap::from([(path[start_position], 0)]);
     let mut queue_left = vec![path[start_position]];
     let mut dist_left = 0;
-    let mut distances_right = AHashMap::from([(path[end_position], 0)]);
+    let mut distances_right = HashMap::from([(path[end_position], 0)]);
     let mut queue_right = vec![path[end_position]];
     let mut dist_right = 0;
 
@@ -227,7 +227,7 @@ pub fn get_next_target_node<K: Kmer>(
         // if shortcut: advance the end_position just before the shortcut
         if shortcut < end_position + 1 {
             end_position = shortcut - 1;
-            distances_right = AHashMap::from([(path[end_position], 0)]);
+            distances_right = HashMap::from([(path[end_position], 0)]);
             queue_right = vec![path[end_position]];
             dist_right = 0;
         }
