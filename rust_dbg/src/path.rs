@@ -1,10 +1,10 @@
 //! Defines how to encode a path in a debruijn Graph. Pri
 
-use debruijn::{Dir, Kmer, dna_string::DnaString};
+use debruijn::{dna_string::DnaString, Dir, Kmer};
 
 use self::node_iterator::NodeIterator;
 use crate::graph::Graph;
-use crate::parse_node;
+use crate::{format_int, parse_node};
 
 use std::collections::VecDeque;
 use std::fmt::Display;
@@ -13,11 +13,11 @@ pub mod node_iterator;
 mod shortest_path;
 
 // for shortest path
-pub const MAX_PATH_LENGTH: usize = 60;
 pub const MIN_PATH_LENGTH: usize = 17; // path encoded on 32 bits
+pub const MAX_PATH_LENGTH: usize = 60;
 // for repetitions
-pub const MAX_OFFSET: u8 = 255;
 pub const MIN_NB_REPEATS: u16 = 13; // repetition encoded on 24 bits
+pub const MAX_OFFSET: u8 = 255;
 
 #[derive(Copy, Clone)]
 /// An enum containing all possible ways to encode a path extension.
@@ -169,13 +169,18 @@ impl<'a, K: Kmer> MixedPath<'a, K> {
         }
     }
 
-    /// Decode the path into a DnaString.
-    pub fn decode_seq(&self) -> DnaString {
+    /// Transform the path into a list of nodes.
+    fn to_list(&self) -> Vec<(usize, Dir)> {
         let mut path = vec![self.start_node];
         for ext in self.extensions.iter() {
             ext.extend_path(self.graph, &mut path);
         }
-        self.graph.sequence_of_path(path.iter())
+        path
+    }
+
+    /// Decode the path into a DnaString.
+    pub fn decode_seq(&self) -> DnaString {
+        self.graph.sequence_of_path(self.to_list().iter())
     }
 
     /// Transform the path into a string representation (to save to text file)
@@ -213,6 +218,75 @@ impl<'a, K: Kmer> MixedPath<'a, K> {
     }
 }
 
+impl<'a, K: Kmer> MixedPath<'a, K> {
+    /// Print some stats about the path.
+    pub fn print_stats(list: &Vec<Self>) {
+        let mut nb_nn = 0;
+        let mut nb_r = 0;
+        let mut nb_sp = 0;
+        let mut nodes_r = 0;
+        let mut nodes_sp = 0;
+
+        for encoding in list {
+            for ext in encoding.extensions.iter() {
+                match ext {
+                    MyExtension::NextNode(_) => {
+                        nb_nn += 1;
+                    }
+                    MyExtension::Repetition((nb_repeats, _offset)) => {
+                        nb_r += 1;
+                        nodes_r += *nb_repeats as usize;
+                    }
+                    MyExtension::ShortestPath(_target_node, length) => {
+                        nb_sp += 1;
+                        nodes_sp += *length;
+                    }
+                }
+            }
+        }
+        // print the stats
+        const NN_COST: usize = 2;
+        const SP_COST: usize = 32;
+        const R_COST: usize = 24;
+
+        let total_nodes = nb_nn + nodes_r + nodes_sp;
+        let total_cost = NN_COST * nb_nn + SP_COST * nb_sp + R_COST * nb_r;
+
+        eprintln!("\n       Method | Number of encoded nodes | Memory cost");
+        eprintln!("--------------|-------------------------|-----------------");
+        for (name, nodes, cost) in [
+            ("Next node", nb_nn, NN_COST * nb_nn),
+            ("Shortest path", nodes_sp, SP_COST * nb_sp),
+            ("Repetition", nodes_r, R_COST * nb_r),
+        ] {
+            eprintln!(
+                "{:>13} | {:>14}  ({:>4.1}%) | {:>11} bits ({:>4.1}%)",
+                name,
+                format_int(nodes),
+                nodes as f64 / total_nodes as f64 * 100.0,
+                format_int(cost),
+                cost as f64 / total_cost as f64 * 100.0
+            );
+        }
+        eprintln!(
+            "        Total | {:>14}  ( 100%) | {:>11} bits ( 100%)",
+            format_int(total_nodes),
+            format_int(total_cost),
+        );
+
+        // plot the histogramm of length_sp and length_r
+        // make_histo(
+        //     length_sp,
+        //     "test_sp",
+        //     Some(0),
+        //     Some(MAX_PATH_LENGTH + 1),
+        //     None,
+        // )
+        // .unwrap();
+        // make_histo(length_r, "test_r", None, Some(400), None).unwrap();
+    }
+}
+
 impl<K: Kmer> Display for MixedPath<'_, K> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.to_string())
@@ -226,7 +300,7 @@ mod unit_test {
     use crate::graph::Graph;
 
     use debruijn::kmer::Kmer3;
-    use debruijn::{DnaSlice, dna_string::DnaString};
+    use debruijn::{dna_string::DnaString, DnaSlice};
 
     const STRANDED: bool = true;
     const SEQ: DnaSlice = DnaSlice(&[2, 2, 2, 1, 1, 1, 1, 2, 2, 2, 0, 0, 0, 0, 0, 1]); // gggccccgggaaaaac
@@ -258,6 +332,7 @@ mod unit_test {
 
         let mut path = Vec::new();
         while let Some(node) = unitig_iter.next().unwrap() {
+            println!("{}", unitig_iter.position());
             path.push(node);
         }
         let path_seq = graph.sequence_of_path(path.iter());

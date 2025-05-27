@@ -1,7 +1,7 @@
 //! Transform a dna sequence into a list of nodes in the graph
 
-use crate::PathwayError;
 use crate::graph::Graph;
+use crate::PathwayError;
 
 use debruijn::dna_string::DnaString;
 use debruijn::{Dir, Kmer, KmerIter, Mer, Vmer};
@@ -86,10 +86,16 @@ impl<'a, K: Kmer, D: Vmer> NodeIterator<'a, K, D> {
             if expected_seq != skipped_bases {
                 println!("skipped bases: {:?}", skipped_bases);
                 println!("expected bases: {:?}", expected_seq);
-                return Err(PathwayError::NodeNotMatching(expected_seq, kmer, 0)); // todo: proper values here
+                return Err(PathwayError::NodeNotMatching(expected_seq, kmer, 0));
+                // todo: proper values here
             }
         }
         Ok(node_iter)
+    }
+
+    /// get the start position (in nucleotides) of the next node in the iterator
+    pub fn position(&self) -> usize {
+        self.kmer_iter.pos - K::k()
     }
 
     /// get the next node in the iterator, without advancing

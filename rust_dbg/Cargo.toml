@@ -13,9 +13,6 @@ clap = { version = "4.5", features = ["derive"] }
 serde = "1"
 bincode = "1.3"
 
-# parallelisation
-rayon = "1"
-
 # plots
 plotters = "0.3"
 

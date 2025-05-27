@@ -1,15 +1,41 @@
-redaction rapport
+à faire:
+- redaction rapport:
+    [ ] abstract
+    [X] intro
+    [-] méthodes
+    [ ] résultats
+    [ ] conclusion
+
+stats:
+- efficacité le long du chromosome (fenêtre glissante)
 
 encodage graph:
 - que faire des bubbles + pb unicité plus court chemin
+- cas de plusieurs séquences: encoder les une par rapport aux autres
 
 passage à l'échelle:
-- voir avec Francesco pour test avec d'autres séquences, sur le cluster
+- compilation sur le cluster / compilation cluster-compatible
+- voir avec Francesco pour test avec d'autres séquences
 
 espace mémoire graphe:
+- remplacer BoomHashMap par NoKeyBoomHashMap dans debruijn
 - stocker juste les unitigs, pas les edges et les 2 hashmaps
-- remplacer BoomHashMap par NoKeyBoomHashMap ?
+
+parallélisation ?
 
 debruijn crate:
 - régler le problème de compilation
-    -> virer la méthode statique k() du trait Kmer + réécrire une bonne partie du code ?
+    -> virer la méthode statique k() du trait Kmer + réécrire une bonne partie de la crate ?
+- KmerIter: proper size hint + override nth()
+
+#######################################################################
+fait:
+- stats: cf capture d'écran -> cout/ efficacité par encodage
+- rapport latex: manque résultats + conclusion
+- upscaling: ça marche pas sur le cluster: rust trop ancien pour le compiler direct ( j'ai envoyé un mail à askhpc pour demander l'installation d'une nouvelle version) / cross compiling pénible (pb avec glibc)
+
+#######################################################################
+à discuter
+- reconstruction pas parfaite, mais 32 bits pas tous nécessaires pour stocker plus court chemin -> on peut utiliser 2 bits pour lever l'ambiguité en cas de plusieurs possibilité (indiquer lequel, par ordre lexicographique emprunter en cas d'ambiguitée)
+- comment combiner les méthodes: grammaire pour dire, "les 4 prochains octets, c du ..." ?
+- nécessité d'écrire les bits 8 pas 8 ?

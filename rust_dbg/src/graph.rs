@@ -10,11 +10,9 @@ use std::ops::{Deref, DerefMut};
 use bincode::{deserialize_from, serialize_into};
 use serde::{Deserialize, Serialize};
 
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use std::fs::File;
-use std::io::{BufReader, Write};
+use std::io::{BufReader, BufWriter};
 use std::path::Path;
-use std::sync::{Arc, Mutex};
 
 use crate::fasta_reader::FastaReader;
 
@@ -35,6 +33,33 @@ impl<K: Kmer> DerefMut for Graph<K> {
 }
 
 impl<K: Kmer> Graph<K> {
+    /// Print some stats about the graph
+    pub fn print_stats(&self) {
+        let mut node_length: usize = 0;
+        let mut nb_edges: usize = 0;
+        let mut edges_histo: [[u32; 5]; 5] = [[0; 5]; 5];
+
+        for node in self.iter_nodes() {
+            node_length += node.len();
+            let exts = node.exts();
+            nb_edges += (exts.num_exts_l() + exts.num_exts_r()) as usize;
+            edges_histo[exts.num_exts_l() as usize][exts.num_exts_r() as usize] += 1;
+        }
+        eprintln!(
+            "Graph contains:\n   - {} nodes\n   - {} edges\nAverage node length: {}",
+            self.len(),
+            nb_edges / 2,
+            node_length / self.len()
+        );
+        eprintln!("Edges histogram:");
+        for i in 0..5 {
+            for j in 0..5 {
+                eprint!("{:>7} ", edges_histo[i][j]);
+            }
+            eprintln!();
+        }
+    }
+
     /// Search a kmer at one side of the nodes
     pub fn search_kmer(&self, kmer: K, side: Dir) -> Option<(usize, Dir)> {
         match side {
@@ -154,55 +179,13 @@ impl<K: Kmer> Graph<K> {
     }
 }
 
-// Parallel construction
-impl<K: Kmer + Send + Sync> Graph<K> {
-    /// Same as [Graph::fix_exts_serial] but with some parallelisation.
-    fn fix_exts(&mut self) {
-        // Get edges wich need update
-        let updates: Vec<(usize, Exts)> = (0..self.len())
-            .into_par_iter()
-            .filter_map(|i| self.get_new_exts(i))
-            .collect();
-
-        // Apply all the updates to the original graph
-        for (node_id, new_exts) in updates {
-            self.base.exts[node_id] = new_exts;
-        }
-    }
-
-    /// Same as [from_unitigs_serial](Graph::from_unitigs_serial) but with some parallelisation.
-    pub fn from_unitigs(path: &Path, stranded: bool) -> Self {
-        let base_graph: BaseGraph<K, ()> = BaseGraph::new(stranded);
-        let base_graph = Arc::new(Mutex::new(base_graph));
-
-        // Iterate over unitigs and add them to the graph
-        let fasta_reader = FastaReader::new(path).unwrap();
-        fasta_reader.into_par_iter().for_each(|record| {
-            let seq_bytes = record.dna_string().to_bytes();
-            let mut graph = base_graph.lock().unwrap();
-            graph.add(seq_bytes, Exts::empty(), ());
-        });
-
-        // Finish the graph (computes boomphf to retrieve unitigs giving their edge kmers)
-        let base_graph = Arc::into_inner(base_graph).unwrap().into_inner().unwrap();
-        let mut graph = Self(base_graph.finish());
-
-        // Update the links between the unitigs
-        graph.fix_exts();
-        graph
-    }
-}
-
 // Dump and load from binary
-
 impl<K: Kmer + Serialize> Graph<K> {
     /// Write the graph as a binary
-    pub fn save_to_binary(
-        &self,
-        mut file_writer: Box<dyn Write>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        // Using bincode 1.3's serialize_into function
-        serialize_into(&mut file_writer, self)?;
+    pub fn save_to_binary(&self, path_bin: &Path) -> Result<(), Box<dyn std::error::Error>> {
+        let file = File::create(path_bin)?;
+        let mut writer = BufWriter::new(file);
+        serialize_into(&mut writer, self)?;
         Ok(())
     }
 }
@@ -212,8 +195,6 @@ impl<K: Kmer + for<'a> Deserialize<'a>> Graph<K> {
     pub fn load_from_binary(path_bin: &Path) -> Result<Self, Box<dyn std::error::Error>> {
         let file = File::open(path_bin)?;
         let reader = BufReader::new(file);
-
-        // Using bincode 1.3's deserialize_from function
         let graph = deserialize_from(reader)?;
         Ok(graph)
     }

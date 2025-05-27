@@ -15,7 +15,7 @@ This script first uses seqdd to fetch data from the NCBI database, given the acc
 ### Generating a graph
 This tool uses a binary graph format, wich must first be generated from a list of unitigs, with the following command:
 ```bash
-cargo run -- -g $PATH_GRAPH -k $K_SIZE build $INPUT_PATH
+cargo run -- -g $PATH_GRAPH -k $K_SIZE build -i $INPUT_PATH
 ```
 By default, kmers are considered as canonical. If not, use the flag `--forward-only`. Howevere, note that the arguments used here must be the same as those used to generate the input file.
 
@@ -43,5 +43,5 @@ cargo run -- -g $PATH_GRAPH -k $K_SIZE decode -i $INPUT_TEXT  -o $OUTPUT_FASTA
 ### Stats
 For an allready encoded path, the command `stats-p` will print some information about the weight and the efficiency of the encoding.
 ```bash
-cargo run -- -g $PATH_GRAPH -k $K_SIZE stats-p
+cargo run -- -g $PATH_GRAPH -k $K_SIZE stats-p -i $INPUT_TEXT
 ```
