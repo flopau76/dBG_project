@@ -4,6 +4,8 @@ use debruijn::compression;
 use debruijn::graph::{BaseGraph, DebruijnGraph};
 use debruijn::{Dir, Exts, Kmer, Vmer};
 
+use boomphf::hashmap::BoomHashMap2;
+
 use std::collections::HashSet;
 use std::ops::{Deref, DerefMut};
 
@@ -147,15 +149,31 @@ impl<K: Kmer> Graph<K> {
                 k.min_rc()
             }
         };
-        let unique_kmers = seq
-            .iter_kmers()
-            .map(|k| can(k))
-            .collect::<HashSet<K>>()
-            .into_iter()
-            .map(|k| (k, ()))
-            .collect::<Vec<_>>();
-        let compression = compression::ScmapCompress::<()>::new();
-        let graph = compression::compress_kmers_no_exts(stranded, &compression, &unique_kmers);
+
+        let kmer_set: HashSet<K> = seq.iter_kmers().map(|k| can(k)).collect();
+        let mut keys = Vec::with_capacity(kmer_set.len());
+        let mut exts = Vec::with_capacity(kmer_set.len());
+        let data = vec![(); kmer_set.len()];
+
+        for kmer in kmer_set.iter() {
+            let mut e = Exts::empty();
+            for base in 0..4 {
+                let new = can(kmer.extend_left(base));
+                if kmer_set.contains(&new) {
+                    e = e.set(Dir::Left, base);
+                }
+                let new = can(kmer.extend_right(base));
+                if kmer_set.contains(&new) {
+                    e = e.set(Dir::Right, base);
+                }
+            }
+            keys.push(*kmer);
+            exts.push(e);
+        }
+
+        let spec = compression::ScmapCompress::<()>::new();
+        let index = BoomHashMap2::new(keys, exts, data);
+        let graph = compression::compress_kmers_with_hash(stranded, &spec, &index);
         Self(graph.finish_serial())
     }
 
@@ -179,23 +197,44 @@ impl<K: Kmer> Graph<K> {
     }
 }
 
+// Parallel construction
+impl<K: Kmer + Send + Sync> Graph<K> {
+    /// Create a graph from a fasta file containing unitigs (as returned by ggcat for example).
+    pub fn from_unitigs(path: &Path, stranded: bool) -> Self {
+        let mut base_graph: BaseGraph<K, ()> = BaseGraph::new(stranded);
+
+        // Iterate over unitigs and add them to the graph
+        let fasta_reader = FastaReader::new(path).unwrap(); // TODO: parallelise this
+        fasta_reader.into_iter().for_each(|record| {
+            let seq_bytes = record.dna_string().to_bytes();
+            base_graph.add(seq_bytes, Exts::empty(), ());
+        });
+
+        // Finish the graph (computes boomphf to retrieve unitigs giving their edge kmers)
+        let mut graph = Self(base_graph.finish());
+
+        // Update the links between the unitigs
+        graph.fix_exts_serial();
+        graph
+    }
+}
+
 // Dump and load from binary
-impl<K: Kmer + Serialize> Graph<K> {
+impl<K: Kmer + Send + Sync + Serialize + for<'a> Deserialize<'a>> Graph<K> {
     /// Write the graph as a binary
     pub fn save_to_binary(&self, path_bin: &Path) -> Result<(), Box<dyn std::error::Error>> {
         let file = File::create(path_bin)?;
         let mut writer = BufWriter::new(file);
-        serialize_into(&mut writer, self)?;
+        serialize_into(&mut writer, &self.base)?;
         Ok(())
     }
-}
-
-impl<K: Kmer + for<'a> Deserialize<'a>> Graph<K> {
     /// Load the graph from a binary file.
     pub fn load_from_binary(path_bin: &Path) -> Result<Self, Box<dyn std::error::Error>> {
         let file = File::open(path_bin)?;
         let reader = BufReader::new(file);
-        let graph = deserialize_from(reader)?;
+        let base: BaseGraph<K, ()> = deserialize_from(reader)?;
+        let graph = Self(base.finish());
+
         Ok(graph)
     }
 }

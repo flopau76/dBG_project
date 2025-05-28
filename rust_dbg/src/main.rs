@@ -84,7 +84,7 @@ impl Commands {
                 eprint!("Creating graph... ");
                 std::io::stderr().flush().unwrap();
                 let start = Instant::now();
-                let graph = Graph::<K>::from_unitigs_serial(input, *forward_only);
+                let graph = Graph::<K>::from_unitigs(input, *forward_only);
                 let duration = start.elapsed();
                 eprintln!("done in {:?}", duration);
 

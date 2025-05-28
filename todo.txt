@@ -17,13 +17,8 @@ passage à l'échelle:
 - compilation sur le cluster / compilation cluster-compatible
 - voir avec Francesco pour test avec d'autres séquences
 
-espace mémoire graphe:
-- remplacer BoomHashMap par NoKeyBoomHashMap dans debruijn
-- stocker juste les unitigs, pas les edges et les 2 hashmaps
-
-parallélisation ?
-
 debruijn crate:
+- remplacer BoomHashMap par NoKeyBoomHashMap dans debruijn
 - régler le problème de compilation
     -> virer la méthode statique k() du trait Kmer + réécrire une bonne partie de la crate ?
 - KmerIter: proper size hint + override nth()

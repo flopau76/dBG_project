@@ -332,7 +332,6 @@ mod unit_test {
 
         let mut path = Vec::new();
         while let Some(node) = unitig_iter.next().unwrap() {
-            println!("{}", unitig_iter.position());
             path.push(node);
         }
         let path_seq = graph.sequence_of_path(path.iter());
