@@ -1,13 +1,19 @@
 //! Defines how to encode a path in a debruijn Graph. Pri
 
-use debruijn::{dna_string::DnaString, Dir, Kmer};
+use debruijn::{dna_string::DnaString, Dir, Kmer, Vmer};
+use needletail::Sequence;
 
 use self::node_iterator::NodeIterator;
+use crate::format_int;
 use crate::graph::Graph;
-use crate::{format_int, parse_node};
 
 use std::collections::VecDeque;
 use std::fmt::Display;
+
+use std::io::{Read, Write};
+
+use bincode::{deserialize_from, serialize_into};
+use serde::{Deserialize, Serialize};
 
 pub mod node_iterator;
 mod shortest_path;
@@ -19,9 +25,9 @@ pub const MAX_PATH_LENGTH: usize = 60;
 pub const MIN_NB_REPEATS: u16 = 13; // repetition encoded on 24 bits
 pub const MAX_OFFSET: u8 = 255;
 
-#[derive(Copy, Clone)]
+#[derive(Serialize, Deserialize, Copy, Clone)]
 /// An enum containing all possible ways to encode a path extension.
-pub enum MyExtension {
+enum MyExtension {
     ShortestPath((usize, Dir), usize), // target_node, length. Note: not necessary to encode length, but usefull for stats
     NextNode((usize, Dir)),
     Repetition((u16, u8)), // nb_repeats, offset (-1)
@@ -35,24 +41,6 @@ impl MyExtension {
             }
             MyExtension::NextNode(next_node) => format!("NN{:?}", next_node),
             MyExtension::Repetition((nb_repeats, offset)) => format!("R:{}x{}", nb_repeats, offset),
-        }
-    }
-    fn from_string(s: &str) -> Self {
-        if s.starts_with("SP") {
-            let (length, target_node) = s[3..].split_once(":").unwrap();
-            let length = length.parse::<usize>().unwrap();
-            let target_node = parse_node(target_node.trim()).unwrap();
-            MyExtension::ShortestPath(target_node, length)
-        } else if s.starts_with("NN") {
-            let target_node = parse_node(s[2..].trim()).unwrap();
-            MyExtension::NextNode(target_node)
-        } else if s.starts_with("R:") {
-            let (size, count) = s[2..].split_once("x").unwrap();
-            let nb_repeats = size.parse::<u16>().unwrap();
-            let offset = count.parse::<u8>().unwrap();
-            MyExtension::Repetition((nb_repeats, offset))
-        } else {
-            panic!("Unknown extension type: {}", s);
         }
     }
     fn extend_path<K: Kmer>(&self, graph: &Graph<K>, path: &mut Vec<(usize, Dir)>) {
@@ -72,16 +60,15 @@ impl MyExtension {
         }
     }
 }
-
 impl Display for MyExtension {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.to_string())
     }
 }
 
-/// A struct that represents a path in a de Bruijn graph using a start node and a list of extensions.
-pub struct MixedPath<'a, K: Kmer> {
-    graph: &'a Graph<K>,
+/// A struct that represents a continuous path in a de Bruijn graph using a start node and a list of extensions.
+#[derive(Serialize, Deserialize)]
+struct ContinuousPath {
     pub start_node: (usize, Dir),
     pub extensions: Vec<MyExtension>,
 }
@@ -121,9 +108,9 @@ fn get_repetitions(path: &Vec<(usize, Dir)>) -> VecDeque<(usize, u16, u8)> {
     repetitions
 }
 
-impl<'a, K: Kmer> MixedPath<'a, K> {
+impl ContinuousPath {
     /// Encode the list of nodes from a sequence into a MixedPath.
-    pub fn encode_seq(graph: &'a Graph<K>, seq: &DnaString) -> Self {
+    pub fn encode_seq<K: Kmer, V: Vmer>(graph: &Graph<K>, seq: &V) -> Self {
         let nodes = NodeIterator::new(graph, seq).unwrap().collect::<Vec<_>>();
         let start_node = nodes[0];
         let mut extensions = Vec::new();
@@ -162,25 +149,19 @@ impl<'a, K: Kmer> MixedPath<'a, K> {
             current_position += repetition.1 as usize;
         }
         extensions.pop(); // remove the sentinel
-        MixedPath {
-            graph,
+        ContinuousPath {
             start_node,
             extensions,
         }
     }
 
-    /// Transform the path into a list of nodes.
-    fn to_list(&self) -> Vec<(usize, Dir)> {
+    /// Decode the path into a DnaString.
+    pub fn decode_seq<K: Kmer>(&self, graph: &Graph<K>) -> DnaString {
         let mut path = vec![self.start_node];
         for ext in self.extensions.iter() {
-            ext.extend_path(self.graph, &mut path);
+            ext.extend_path(graph, &mut path);
         }
-        path
-    }
-
-    /// Decode the path into a DnaString.
-    pub fn decode_seq(&self) -> DnaString {
-        self.graph.sequence_of_path(self.to_list().iter())
+        graph.sequence_of_path(path.iter())
     }
 
     /// Transform the path into a string representation (to save to text file)
@@ -192,43 +173,96 @@ impl<'a, K: Kmer> MixedPath<'a, K> {
         }
         result
     }
+}
 
-    /// Create a path from its string representation (to load from text file)
-    pub fn from_string(s: &str, graph: &'a Graph<K>) -> Result<Self, Box<dyn std::error::Error>> {
-        let mut lines = s.lines();
-
-        let start_node = lines
-            .next()
-            .unwrap()
-            .strip_prefix("Start node: ")
-            .ok_or("Wrong format: missing start node")?;
-        let start_node = parse_node(&start_node)?;
-
-        let mut extensions = Vec::new();
-        for line in lines {
-            let ext = MyExtension::from_string(line);
-            extensions.push(ext);
-        }
-
-        Ok(MixedPath {
-            graph,
-            start_node,
-            extensions,
-        })
+impl Display for ContinuousPath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.to_string())
     }
 }
 
-impl<'a, K: Kmer> MixedPath<'a, K> {
+/// A struct encoding a sequence in a de Bruijn graph.
+#[derive(Serialize, Deserialize)]
+pub struct DiscontinuousPath {
+    id: String,
+    sequences: Vec<ContinuousPath>,
+    masks: Vec<usize>,
+}
+
+impl DiscontinuousPath {
+    pub fn header(&self) -> &str {
+        &self.id
+    }
+    /// Encode a sequence into a Path in a graph.
+    pub fn encode_record<'a, K: Kmer, S: Sequence<'a>>(
+        graph: &'a Graph<K>,
+        record: &'a S,
+        id: String,
+    ) -> Self {
+        let mut sequences = Vec::new();
+        let mut masks = Vec::new();
+
+        let mut count_n = 0;
+        for seq in record.normalize(false).split(|c| *c == b'N') {
+            if seq.is_empty() {
+                count_n += 1;
+                continue;
+            }
+            masks.push(count_n);
+            let seq = DnaString::from_acgt_bytes(seq);
+            let path = ContinuousPath::encode_seq(graph, &seq);
+            sequences.push(path);
+            count_n = 0;
+        }
+        masks.push(count_n);
+
+        Self {
+            id,
+            sequences,
+            masks,
+        }
+    }
+
+    /// Decode the encoded path into a string representation.
+    pub fn decode_record<K: Kmer>(&self, graph: &Graph<K>) -> String {
+        let mut record = String::new();
+        assert_eq!(self.masks.len(), self.sequences.len() + 1);
+        for i in 0..self.sequences.len() {
+            record.push_str("N".repeat(self.masks[i]).as_str());
+            let seq = self.sequences[i].decode_seq(graph);
+            record.push_str(&seq.to_string());
+        }
+        record.push_str("N".repeat(*self.masks.last().unwrap()).as_str());
+        record
+    }
+
+    /// Append a single path to a binary file
+    pub fn append_to_binary<W: Write>(
+        &self,
+        file_writer: &mut W,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        serialize_into(file_writer, self)?;
+        Ok(())
+    }
+
+    /// Load a single path from the given file reader
+    pub fn load_from_binary<R: Read>(
+        file_reader: &mut R,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let result = deserialize_from(file_reader)?;
+        Ok(result)
+    }
+
     /// Print some stats about the path.
-    pub fn print_stats(list: &Vec<Self>) {
+    pub fn print_stats(&self) {
         let mut nb_nn = 0;
         let mut nb_r = 0;
         let mut nb_sp = 0;
         let mut nodes_r = 0;
         let mut nodes_sp = 0;
 
-        for encoding in list {
-            for ext in encoding.extensions.iter() {
+        for seq in self.sequences.iter() {
+            for ext in seq.extensions.iter() {
                 match ext {
                     MyExtension::NextNode(_) => {
                         nb_nn += 1;
@@ -273,23 +307,6 @@ impl<'a, K: Kmer> MixedPath<'a, K> {
             format_int(total_nodes),
             format_int(total_cost),
         );
-
-        // plot the histogramm of length_sp and length_r
-        // make_histo(
-        //     length_sp,
-        //     "test_sp",
-        //     Some(0),
-        //     Some(MAX_PATH_LENGTH + 1),
-        //     None,
-        // )
-        // .unwrap();
-        // make_histo(length_r, "test_r", None, Some(400), None).unwrap();
-    }
-}
-
-impl<K: Kmer> Display for MixedPath<'_, K> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.to_string())
     }
 }
 
@@ -345,7 +362,7 @@ mod unit_test {
         // seq -> (node_list) -> path
         let seq = DnaString::from_bytes(SEQ.0);
         let graph = Graph::<Kmer3>::from_seq_serial(&SEQ, STRANDED);
-        let path = MixedPath::encode_seq(&graph, &seq);
+        let path = ContinuousPath::encode_seq(&graph, &seq);
         for ext in path.extensions.iter() {
             println!("{}", ext);
         }
@@ -357,20 +374,7 @@ mod unit_test {
         let seq = DnaString::from_bytes(SEQ.0);
         let graph = Graph::<Kmer3>::from_seq_serial(&SEQ, STRANDED);
 
-        let decoded_seq = MixedPath::encode_seq(&graph, &seq).decode_seq();
-        assert_eq!(seq, decoded_seq);
-    }
-
-    #[test]
-    fn test_path_to_string() {
-        // seq -> (node_list) -> path -> string -> path -> (node_list) -> seq
-        let seq = DnaString::from_bytes(SEQ.0);
-        let graph = Graph::<Kmer3>::from_seq_serial(&SEQ, STRANDED);
-
-        let path_str = MixedPath::encode_seq(&graph, &seq).to_string();
-        let decoded_seq = MixedPath::from_string(&path_str, &graph)
-            .unwrap()
-            .decode_seq();
+        let decoded_seq = ContinuousPath::encode_seq(&graph, &seq).decode_seq(&graph);
         assert_eq!(seq, decoded_seq);
     }
 

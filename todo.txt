@@ -6,12 +6,14 @@
     [ ] résultats
     [ ] conclusion
 
-stats:
-- efficacité le long du chromosome (fenêtre glissante)
-
 encodage graph:
+- better handle hardmasked regions / N
+- efficacité le long du chromosome (fenêtre glissante)
 - que faire des bubbles + pb unicité plus court chemin
 - cas de plusieurs séquences: encoder les une par rapport aux autres
+
+autre:
+- compatible with fna.gz -> use needletail
 
 passage à l'échelle:
 - compilation sur le cluster / compilation cluster-compatible

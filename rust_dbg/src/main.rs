@@ -1,12 +1,11 @@
-use rust_dbg::fasta_reader::FastaReader;
 use rust_dbg::graph::Graph;
-use rust_dbg::path::{MixedPath, MAX_OFFSET, MAX_PATH_LENGTH, MIN_NB_REPEATS, MIN_PATH_LENGTH};
-use rust_dbg::print_progress_bar;
+use rust_dbg::path::DiscontinuousPath;
 
 use debruijn::{kmer, Kmer};
+use needletail::parse_fastx_file;
 
 use std::fs::File;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufReader, Write};
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -101,37 +100,15 @@ impl Commands {
             }
             Commands::Encode { input, output } => {
                 let graph = Graph::<K>::load_from_binary(path_graph).unwrap();
-                let fasta_reader = FastaReader::new(input).unwrap();
+                let mut input_reader = parse_fastx_file(input).unwrap();
                 let mut output_writer = File::create(output).unwrap();
 
-                // write the header
-                let date = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-                writeln!(output_writer, "DATE:\n\t{}", date).unwrap();
-                let git_hash = option_env!("GIT_COMMIT_HASH").unwrap_or("unknown");
-                writeln!(output_writer, "GIT VERSION:\n\t{}", git_hash).unwrap();
-                let command = std::env::args().collect::<Vec<_>>().join(" ");
-                writeln!(output_writer, "COMMAND:\n\t{}", command).unwrap();
-                writeln!(output_writer, "CONSTANTS:").unwrap();
-                writeln!(output_writer, "\tMIN_PATH_LENGTH: {}", MIN_PATH_LENGTH).unwrap();
-                writeln!(output_writer, "\tMAX_PATH_LENGTH: {}", MAX_PATH_LENGTH).unwrap();
-                writeln!(output_writer, "\tMIN_NB_REPEATS: {}", MIN_NB_REPEATS).unwrap();
-                writeln!(output_writer, "\tMAX_OFFSET: {}", MAX_OFFSET).unwrap();
-
-                // encode the records
-                for record in fasta_reader {
-                    eprintln!("Encoding record {}", record.header());
-                    let dna_strings = record.dna_strings();
-                    let mut current = 0;
-                    let total = dna_strings.len();
-                    for dna_string in dna_strings {
-                        print_progress_bar(current, total);
-                        current += 1;
-                        let path = MixedPath::encode_seq(&graph, &dna_string);
-                        writeln!(output_writer, ">{}_{}", record.header(), current).unwrap();
-                        writeln!(output_writer, "{}", path).unwrap();
-                    }
-                    print_progress_bar(current, total);
-                    eprintln!();
+                while let Some(record) = input_reader.next() {
+                    let record = record.unwrap();
+                    let id = String::from_utf8_lossy(record.id());
+                    eprintln!("Encoding record {}", id);
+                    let path = DiscontinuousPath::encode_record(&graph, &record, id.to_string());
+                    path.append_to_binary(&mut output_writer).unwrap();
                 }
             }
             Commands::Decode { input, output } => {
@@ -139,46 +116,18 @@ impl Commands {
                 let mut input_reader = BufReader::new(File::open(input).unwrap());
                 let mut output_writer = File::create(output).unwrap();
 
-                // go to the first '>'
-                input_reader.skip_until(b'>').unwrap();
-                let mut header = String::new();
-                while input_reader.read_line(&mut header).unwrap() > 0 {
-                    // read the path
-                    let mut buffer = Vec::new();
-                    input_reader.read_until(b'>', &mut buffer).unwrap();
-                    if buffer.last() == Some(&b'>') {
-                        buffer.pop();
-                    }
-                    let path_str = String::from_utf8_lossy(&buffer);
-                    let path = MixedPath::from_string(&path_str, &graph).unwrap();
-
-                    // proccess the path
-                    eprintln!("Decoding record {}", header);
-                    let seq = path.decode_seq();
-                    writeln!(output_writer, ">{}", header).unwrap();
+                while let Ok(record) = DiscontinuousPath::load_from_binary(&mut input_reader) {
+                    let seq = record.decode_record(&graph);
+                    writeln!(output_writer, ">{}", record.header()).unwrap();
                     writeln!(output_writer, "{}", seq.to_string()).unwrap();
                 }
             }
             Commands::StatsP { input } => {
-                let graph = Graph::<K>::load_from_binary(path_graph).unwrap();
                 let mut input_reader = BufReader::new(File::open(input).unwrap());
-                let mut paths_list = Vec::new();
 
-                // go to the first '>'
-                input_reader.skip_until(b'>').unwrap();
-                let mut header = String::new();
-                while input_reader.read_line(&mut header).unwrap() > 0 {
-                    // read the path
-                    let mut buffer = Vec::new();
-                    input_reader.read_until(b'>', &mut buffer).unwrap();
-                    if buffer.last() == Some(&b'>') {
-                        buffer.pop();
-                    }
-                    let path_str = String::from_utf8_lossy(&buffer);
-                    let path = MixedPath::from_string(&path_str, &graph).unwrap();
-                    paths_list.push(path);
+                while let Ok(record) = DiscontinuousPath::load_from_binary(&mut input_reader) {
+                    record.print_stats();
                 }
-                MixedPath::print_stats(&paths_list);
             }
         }
     }

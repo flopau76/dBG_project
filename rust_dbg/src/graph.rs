@@ -1,10 +1,11 @@
 //! To create graphs from fasta/unitig files
 
-use debruijn::compression;
 use debruijn::graph::{BaseGraph, DebruijnGraph};
+use debruijn::{base_to_bits, compression};
 use debruijn::{Dir, Exts, Kmer, Vmer};
 
 use boomphf::hashmap::BoomHashMap2;
+use needletail::parse_fastx_file;
 
 use std::collections::HashSet;
 use std::ops::{Deref, DerefMut};
@@ -15,8 +16,6 @@ use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
 use std::path::Path;
-
-use crate::fasta_reader::FastaReader;
 
 /// Wrapper around the DebruijnGraph from the debruijn crate.
 #[derive(Serialize, Deserialize, Debug)]
@@ -182,11 +181,13 @@ impl<K: Kmer> Graph<K> {
         let mut base_graph: BaseGraph<K, ()> = BaseGraph::new(stranded);
 
         // Iterate over unitigs and add them to the graph
-        let fasta_reader = FastaReader::new(path).unwrap();
-        fasta_reader.into_iter().for_each(|record| {
-            let seq_bytes = record.dna_string().to_bytes();
-            base_graph.add(seq_bytes, Exts::empty(), ());
-        });
+        let mut fasta_reader = parse_fastx_file(path).unwrap();
+        while let Some(record) = fasta_reader.next() {
+            let record = record.unwrap();
+            let seq = record.seq();
+            let seq_iter = seq.iter().map(|b| base_to_bits(*b));
+            base_graph.add(seq_iter, Exts::empty(), ());
+        }
 
         // Finish the graph (computes boomphf to retrieve unitigs giving their edge kmers)
         let mut graph = Self(base_graph.finish_serial());
@@ -204,11 +205,13 @@ impl<K: Kmer + Send + Sync> Graph<K> {
         let mut base_graph: BaseGraph<K, ()> = BaseGraph::new(stranded);
 
         // Iterate over unitigs and add them to the graph
-        let fasta_reader = FastaReader::new(path).unwrap(); // TODO: parallelise this
-        fasta_reader.into_iter().for_each(|record| {
-            let seq_bytes = record.dna_string().to_bytes();
-            base_graph.add(seq_bytes, Exts::empty(), ());
-        });
+        let mut fasta_reader = parse_fastx_file(path).unwrap();
+        while let Some(record) = fasta_reader.next() {
+            let record = record.unwrap();
+            let seq = record.seq();
+            let seq_iter = seq.iter().map(|b| base_to_bits(*b));
+            base_graph.add(seq_iter, Exts::empty(), ());
+        }
 
         // Finish the graph (computes boomphf to retrieve unitigs giving their edge kmers)
         let mut graph = Self(base_graph.finish());

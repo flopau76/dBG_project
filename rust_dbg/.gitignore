@@ -1,6 +1,5 @@
 /target
 Cargo.lock
-
 flamegraph*
 perf*
 profile*
