@@ -7,20 +7,24 @@
 #SBATCH --mem=20G
 #SBATCH --partition=seqbio
 #SBATCH --qos=seqbio
-#SBATCH --output=%x_%j.out
-#SBATCH --error=%x_%j.err
+#SBATCH --output=%x_%A_%a.out
+#SBATCH --error=%x_%A_%a.err
+#SBATCH --array=1-1
 
 module purge
 module load SeqKit
 module load ggcat
 
+# define the parameter k
+# k_values=(15 19 23 27 31)
+# k=${k_values[$SLURM_ARRAY_TASK_ID]}
+# k=$SLURM_ARRAY_TASK_ID
 
 # Define the paths to the files and executable
 export PATH=$PATH:"$PWD/rust_dbg/target/release"
 path_fasta="./data/scerevisiae8.fa.gz"
 path_split="./data/scerevisiae8_splits"
-path_graphs="./data/scerevisiae8_graphs"
-k=31
+path_graphs="./data/scerevisiae8_graphs_k${k}"
 
 #____________________________________________________
 # Split fasta by individuals
@@ -52,13 +56,27 @@ unset IFS
 # Create graphs containing different number of individuals
 #____________________________________________________
 
-mkdir -p $path_graphs
-for i in $(seq 1 ${#sorted_file_names[@]}); do
-    temp_file_list=()
-    for j in $(seq 0 $((i - 1))); do
-        temp_file_list+=("$path_split/${sorted_file_names[j]}")
-    done
-    srun ggcat build -k $k ${temp_file_list[@]} -o $path_graphs/n${i}_k${k}.fna --min-multiplicity 1 -j 4
-    srun rust_dbg -k $k -g $path_graphs/n${i}_k${k}.bin build -i $path_graphs/n${i}_k${k}.fna
-done
-rm $path_graphs/*.stats.log
+# mkdir -p $path_graphs
+# for n in $(seq 1 ${#sorted_file_names[@]}); do
+#     temp_file_list=()
+#     for j in $(seq 0 $((i - 1))); do
+#         temp_file_list+=("$path_split/${sorted_file_names[j]}")
+#     done
+#     srun ggcat build -k $k ${temp_file_list[@]} -o $path_graphs/n${n}_k${k}.fna --min-multiplicity 1 -j 4
+#     srun rust_dbg -k $k -g $path_graphs/n${n}_k${k}.bin build -i $path_graphs/n${n}_k${k}.fna
+# done
+# rm $path_graphs/*.stats.log
+
+#____________________________________________________
+# Encode paths
+#____________________________________________________
+n=8
+k=31
+
+fasta_name=${sorted_file_names[$i]}
+path_input=$path_split/$fasta_name
+path_output=$path_graphs/n${i}_k${k}_$fasta_name.fna
+path_bin_graph=$path_graphs/n${i}_k${k}.bin
+
+echo "Encoding path $path_split in graph: $path_bin_graph
+srun rust_dbg -k $k -g $path_bin_graph encode -i $path_input -o $path_output
