@@ -46,19 +46,19 @@ impl<K: Kmer> Graph<K> {
             nb_edges += (exts.num_exts_l() + exts.num_exts_r()) as usize;
             edges_histo[exts.num_exts_l() as usize][exts.num_exts_r() as usize] += 1;
         }
-        eprintln!(
-            "Graph contains:\n   - {} nodes\n   - {} edges\nAverage node length: {}",
+        println!(
+            "Graph contains:\t   - {} nodes\t   - {} edges\tAverage node length: {}",
             self.len(),
-            nb_edges / 2,
-            node_length / self.len()
+            nb_edges as f64 / 2.0,
+            node_length as f64 / self.len() as f64
         );
-        eprintln!("Edges histogram:");
-        for i in 0..5 {
-            for j in 0..5 {
-                eprint!("{:>7} ", edges_histo[i][j]);
-            }
-            eprintln!();
-        }
+        // println!("Edges histogram:");
+        // for i in 0..5 {
+        //     for j in 0..5 {
+        //         eprint!("{:>7} ", edges_histo[i][j]);
+        //     }
+        //     println!();
+        // }
     }
 
     /// Search a kmer at one side of the nodes

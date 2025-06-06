@@ -3,8 +3,8 @@
 #SBATCH --job-name=test_graphs
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=20G
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=5G
 #SBATCH --partition=seqbio
 #SBATCH --qos=seqbio
 #SBATCH --output=%x_%A_%a.out
@@ -80,5 +80,6 @@ path_input=$path_split/$fasta_name
 path_output=$path_encoding/n${n}_k${k}_$fasta_id.bin
 path_bin_graph=$path_graphs/n${n}_k${k}.bin
 
+mkdir -p $path_encoding
 echo "Encoding path $path_input in graph: $path_bin_graph" >&2
 srun rust_dbg -k $k -g $path_bin_graph encode -i $path_input -o $path_output

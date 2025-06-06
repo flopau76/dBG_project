@@ -95,6 +95,7 @@ impl Commands {
                 eprintln!("done in {:?}", duration);
             }
             Commands::StatsG {} => {
+                print!("Stats for graph {:?}", path_graph);
                 let graph = Graph::<K>::load_from_binary(&path_graph).unwrap();
                 graph.print_stats();
             }
