@@ -22,7 +22,7 @@ mod shortest_path;
 pub const MIN_PATH_LENGTH: usize = 17; // path encoded on 32 bits
 pub const MAX_PATH_LENGTH: usize = 60;
 // for repetitions
-pub const MIN_NB_REPEATS: u16 = 13; // repetition encoded on 24 bits
+pub const MIN_NB_REPEATS: u16 = 1; // repetition encoded on 24 bits
 pub const MAX_OFFSET: u8 = 255;
 
 #[derive(Serialize, Deserialize, Copy, Clone)]
@@ -147,7 +147,7 @@ impl ContinuousPath {
             }
             // add the repetition
             extensions.push(MyExtension::Repetition((repetition.1, repetition.2)));
-            println!("R:{}-{}", repetition.1, repetition.2);
+            println!("R:{}-{}", repetition.1, repetition.2); // note: this also prints the sentinel
             current_node += repetition.1 as usize;
         }
         extensions.pop(); // remove the sentinel
