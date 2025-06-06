@@ -49,7 +49,7 @@ impl<K: Kmer> Graph<K> {
         println!(
             "Graph contains:\t   - {} nodes\t   - {} edges\tAverage node length: {}",
             self.len(),
-            nb_edges as f64 / 2.0,
+            nb_edges / 2,
             node_length as f64 / self.len() as f64
         );
         // println!("Edges histogram:");

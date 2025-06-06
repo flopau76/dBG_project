@@ -15,11 +15,6 @@ module purge
 module load SeqKit
 module load ggcat
 
-# define the parameter k
-# k_values=(15 19 23 27 31)
-# k=${k_values[$SLURM_ARRAY_TASK_ID]}
-# k=$SLURM_ARRAY_TASK_ID
-
 # Define the paths to the files and executable
 export PATH=$PATH:"$PWD/rust_dbg/target/release"
 path_fasta="./data/scerevisiae8.fa.gz"
@@ -34,7 +29,7 @@ path_encoding="./data/scerevisiae8_encoding"
 # srun seqkit split $path_fasta -i --id-regexp "^([\w]+)#" -O $path_split
 
 #____________________________________________________
-# Get the name of the newly created files
+# Create an array with the names of the genomes
 #____________________________________________________
 
 # Initialize an empty array to store file names
@@ -57,6 +52,11 @@ unset IFS
 # Create graphs containing different number of individuals
 #____________________________________________________
 
+# define the parameter k
+# k_values=(15 19 23 27 31)
+# k=${k_values[$SLURM_ARRAY_TASK_ID]}
+# k=$SLURM_ARRAY_TASK_ID
+
 # mkdir -p $path_graphs
 # for n in $(seq 1 ${#sorted_file_names[@]}); do
 #     temp_file_list=()
@@ -69,10 +69,20 @@ unset IFS
 # rm $path_graphs/*.stats.log
 
 #____________________________________________________
+# Get stats about graphs
+#____________________________________________________
+
+# k=31
+
+# for n in {1..8}; do
+#     srun rust_dbg -k $k -g data/scerevisiae8_graphs/n${n}_k${k}.bin stats-g
+# done
+
+#____________________________________________________
 # Encode paths
 #____________________________________________________
 n=8
-k=13
+k=31
 
 fasta_name=${sorted_file_names[$((SLURM_ARRAY_TASK_ID-1))]}
 fasta_id=$(echo "$fasta_name" | sed -E 's/.*\.part_([^.]+)\.fa\.gz/\1/')

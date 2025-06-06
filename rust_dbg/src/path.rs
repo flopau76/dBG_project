@@ -116,8 +116,7 @@ impl ContinuousPath {
         let mut extensions = Vec::new();
 
         let mut current_node = 0;
-        // let mut repetitions = get_repetitions(&nodes);
-        let mut repetitions = VecDeque::new();
+        let mut repetitions = get_repetitions(&nodes);
         repetitions.push_back((nodes.len(), 0, 0)); // add a sentinel to avoid adding the last part separately
 
         while let Some(repetition) = repetitions.pop_front() {
@@ -148,6 +147,7 @@ impl ContinuousPath {
             }
             // add the repetition
             extensions.push(MyExtension::Repetition((repetition.1, repetition.2)));
+            println!("R:{}-{}", repetition.1, repetition.2);
             current_node += repetition.1 as usize;
         }
         extensions.pop(); // remove the sentinel
