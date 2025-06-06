@@ -9,7 +9,7 @@
 #SBATCH --qos=seqbio
 #SBATCH --output=%x_%A_%a.out
 #SBATCH --error=%x_%A_%a.err
-#SBATCH --array=1-1
+#SBATCH --array=1-8
 
 module purge
 module load SeqKit
@@ -24,7 +24,8 @@ module load ggcat
 export PATH=$PATH:"$PWD/rust_dbg/target/release"
 path_fasta="./data/scerevisiae8.fa.gz"
 path_split="./data/scerevisiae8_splits"
-path_graphs="./data/scerevisiae8_graphs_k${k}"
+path_graphs="./data/scerevisiae8_graphs"
+path_encoding="./data/scerevisiae8_encoding"
 
 #____________________________________________________
 # Split fasta by individuals
@@ -71,12 +72,13 @@ unset IFS
 # Encode paths
 #____________________________________________________
 n=8
-k=31
+k=13
 
-fasta_name=${sorted_file_names[$i]}
+fasta_name=${sorted_file_names[$((SLURM_ARRAY_TASK_ID-1))]}
+fasta_id=$(echo "$fasta_name" | sed -E 's/.*\.part_([^.]+)\.fa\.gz/\1/')
 path_input=$path_split/$fasta_name
-path_output=$path_graphs/n${i}_k${k}_$fasta_name.fna
-path_bin_graph=$path_graphs/n${i}_k${k}.bin
+path_output=$path_encoding/n${n}_k${k}_$fasta_id.bin
+path_bin_graph=$path_graphs/n${n}_k${k}.bin
 
-echo "Encoding path $path_split in graph: $path_bin_graph
+echo "Encoding path $path_input in graph: $path_bin_graph" >&2
 srun rust_dbg -k $k -g $path_bin_graph encode -i $path_input -o $path_output
