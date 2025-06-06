@@ -115,19 +115,21 @@ impl ContinuousPath {
         let start_node = nodes[0];
         let mut extensions = Vec::new();
 
-        let mut current_position = 0;
-        let mut repetitions = get_repetitions(&nodes);
+        let mut current_node = 0;
+        // let mut repetitions = get_repetitions(&nodes);
+        let mut repetitions = VecDeque::new();
         repetitions.push_back((nodes.len(), 0, 0)); // add a sentinel to avoid adding the last part separately
 
         while let Some(repetition) = repetitions.pop_front() {
             let target_pos = repetition.0 - 1;
-            while current_position < target_pos {
+            while current_node < target_pos {
                 let (mut shortest_path, mut length) =
-                    shortest_path::get_next_target_node(graph, &nodes, current_position)
+                    shortest_path::get_next_target_node(graph, &nodes, current_node)
                         .unwrap()
                         .unwrap();
-                if current_position + length >= target_pos {
-                    length = target_pos - current_position;
+                println!("SP: {}", length);
+                if current_node + length >= target_pos {
+                    length = target_pos - current_node;
                     shortest_path = nodes[target_pos];
                 }
                 // if the shortest path is long enough, we use it to extend the path
@@ -137,16 +139,16 @@ impl ContinuousPath {
                 // otherwise, we encode its nodes directly (2 bits per node)
                 else {
                     extensions.extend(
-                        nodes[current_position + 1..current_position + 1 + length]
+                        nodes[current_node + 1..current_node + 1 + length]
                             .iter()
                             .map(|&node| MyExtension::NextNode(node)),
                     );
                 }
-                current_position += length as usize;
+                current_node += length as usize;
             }
             // add the repetition
             extensions.push(MyExtension::Repetition((repetition.1, repetition.2)));
-            current_position += repetition.1 as usize;
+            current_node += repetition.1 as usize;
         }
         extensions.pop(); // remove the sentinel
         ContinuousPath {
