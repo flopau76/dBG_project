@@ -124,8 +124,8 @@ impl Commands {
                 }
             }
             Commands::StatsP { input } => {
+                println!("Stats for path in {:?}", input);
                 let mut input_reader = BufReader::new(File::open(input).unwrap());
-
                 while let Ok(record) = DiscontinuousPath::load_from_binary(&mut input_reader) {
                     record.print_stats();
                 }

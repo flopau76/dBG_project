@@ -9,7 +9,7 @@
 #SBATCH --qos=seqbio
 #SBATCH --output=%x_%A_%a.out
 #SBATCH --error=%x_%A_%a.err
-#SBATCH --array=1-8
+#SBATCH --array=1-1
 
 module purge
 module load SeqKit
@@ -81,15 +81,28 @@ unset IFS
 #____________________________________________________
 # Encode paths
 #____________________________________________________
+# n=8
+# k=23
+
+# fasta_name=${sorted_file_names[$((SLURM_ARRAY_TASK_ID-1))]}
+# fasta_id=$(echo "$fasta_name" | sed -E 's/.*\.part_([^.]+)\.fa\.gz/\1/')
+
+# path_input=$path_split/$fasta_name
+# path_output=$path_encoding/n${n}_k${k}_$fasta_id.bin
+# path_bin_graph=$path_graphs/n${n}_k${k}.bin
+
+# mkdir -p $path_encoding
+# echo "Encoding path $path_input in graph: $path_bin_graph" >&2
+# srun rust_dbg -k $k -g $path_bin_graph encode -i $path_input -o $path_output
+
+#____________________________________________________
+# Get stats about paths
+#____________________________________________________
 n=8
-k=31
+k=23
 
-fasta_name=${sorted_file_names[$((SLURM_ARRAY_TASK_ID-1))]}
-fasta_id=$(echo "$fasta_name" | sed -E 's/.*\.part_([^.]+)\.fa\.gz/\1/')
-path_input=$path_split/$fasta_name
-path_output=$path_encoding/n${n}_k${k}_$fasta_id.bin
-path_bin_graph=$path_graphs/n${n}_k${k}.bin
-
-mkdir -p $path_encoding
-echo "Encoding path $path_input in graph: $path_bin_graph" >&2
-srun rust_dbg -k $k -g $path_bin_graph encode -i $path_input -o $path_output
+for file in $path_encoding/*; do
+    if [[ -f $file ]]; then
+        srun rust_dbg -k $k -g $path_graphs/n${n}_k${k}.bin stats-p -i $file
+    fi
+done

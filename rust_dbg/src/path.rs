@@ -288,14 +288,14 @@ impl DiscontinuousPath {
         let total_nodes = nb_nn + nodes_r + nodes_sp;
         let total_cost = NN_COST * nb_nn + SP_COST * nb_sp + R_COST * nb_r;
 
-        eprintln!("\n       Method | Number of encoded nodes | Memory cost");
-        eprintln!("--------------|-------------------------|-----------------");
+        println!("\n       Method | Number of encoded nodes | Memory cost");
+        println!("--------------|-------------------------|-----------------");
         for (name, nodes, cost) in [
             ("Next node", nb_nn, NN_COST * nb_nn),
             ("Shortest path", nodes_sp, SP_COST * nb_sp),
             ("Repetition", nodes_r, R_COST * nb_r),
         ] {
-            eprintln!(
+            println!(
                 "{:>13} | {:>14}  ({:>4.1}%) | {:>11} bits ({:>4.1}%)",
                 name,
                 format_int(nodes),
@@ -304,7 +304,7 @@ impl DiscontinuousPath {
                 cost as f64 / total_cost as f64 * 100.0
             );
         }
-        eprintln!(
+        println!(
             "        Total | {:>14}  ( 100%) | {:>11} bits ( 100%)",
             format_int(total_nodes),
             format_int(total_cost),
