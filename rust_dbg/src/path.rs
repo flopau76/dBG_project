@@ -19,10 +19,10 @@ pub mod node_iterator;
 mod shortest_path;
 
 // for shortest path
-pub const MIN_PATH_LENGTH: usize = 17; // path encoded on 32 bits
+pub const MIN_PATH_LENGTH: usize = 10; // path encoded on 32 bits
 pub const MAX_PATH_LENGTH: usize = 60;
 // for repetitions
-pub const MIN_NB_REPEATS: u16 = 1; // repetition encoded on 24 bits
+pub const MIN_NB_REPEATS: u16 = 8; // repetition encoded on 24 bits
 pub const MAX_OFFSET: u8 = 255;
 
 #[derive(Serialize, Deserialize, Copy, Clone)]
@@ -126,11 +126,11 @@ impl ContinuousPath {
                     shortest_path::get_next_target_node(graph, &nodes, current_node)
                         .unwrap()
                         .unwrap();
-                println!("SP: {}", length);
                 if current_node + length >= target_pos {
                     length = target_pos - current_node;
                     shortest_path = nodes[target_pos];
                 }
+                println!("SP: {}", length);
                 // if the shortest path is long enough, we use it to extend the path
                 if length >= MIN_PATH_LENGTH {
                     extensions.push(MyExtension::ShortestPath(shortest_path, length));
@@ -142,6 +142,7 @@ impl ContinuousPath {
                             .iter()
                             .map(|&node| MyExtension::NextNode(node)),
                     );
+                    println!("NN: {}", length);
                 }
                 current_node += length as usize;
             }
