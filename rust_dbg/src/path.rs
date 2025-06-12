@@ -19,7 +19,7 @@ pub mod node_iterator;
 mod shortest_path;
 
 // for shortest path
-pub const MIN_PATH_LENGTH: usize = 17; // path encoded on 32 bits
+pub const MIN_PATH_LENGTH: usize = 1; // path encoded on 32 bits
 pub const MAX_PATH_LENGTH: usize = 60;
 // for repetitions
 pub const MIN_NB_REPEATS: u16 = 13; // repetition encoded on 24 bits
@@ -320,7 +320,17 @@ mod unit_test {
     use debruijn::{dna_string::DnaString, DnaSlice};
 
     const STRANDED: bool = true;
-    const SEQ: DnaSlice = DnaSlice(&[2, 2, 2, 1, 1, 1, 1, 2, 2, 2, 0, 0, 0, 0, 0, 1]); // gggccccgggaaaaac
+    // const SEQ: DnaSlice = DnaSlice(&[2, 2, 2, 1, 1, 1, 1, 2, 2, 2, 0, 0, 0, 0, 0, 1]); // gggccccgggaaaaac      lots of repetitions
+    const SEQ: DnaSlice = DnaSlice(&[2, 2, 1, 1, 1, 0, 0, 0, 0, 0, 3, 3]); // ggcccaaaatt
+
+    #[ignore]
+    #[test]
+    fn print_graph() {
+        // seq -> node_list -> seq
+        let graph = Graph::<Kmer3>::from_seq_serial(&SEQ, STRANDED);
+        println!("{:?}", graph.base.sequences);
+        graph.print();
+    }
 
     #[test]
     fn test_node_iterator_offset() {
