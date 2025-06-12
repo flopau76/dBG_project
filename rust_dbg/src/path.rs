@@ -123,9 +123,7 @@ impl ContinuousPath {
             let target_pos = repetition.0 - 1;
             while current_position < target_pos {
                 let (mut shortest_path, mut length) =
-                    shortest_path::get_next_target_node(graph, &nodes, current_position)
-                        .unwrap()
-                        .unwrap();
+                    shortest_path::get_next_target_node(graph, &nodes, current_position).unwrap();
                 if current_position + length >= target_pos {
                     length = target_pos - current_position;
                     shortest_path = nodes[target_pos];
@@ -319,14 +317,12 @@ mod unit_test {
     use debruijn::kmer::Kmer3;
     use debruijn::{dna_string::DnaString, DnaSlice};
 
-    const STRANDED: bool = true;
-    // const SEQ: DnaSlice = DnaSlice(&[2, 2, 2, 1, 1, 1, 1, 2, 2, 2, 0, 0, 0, 0, 0, 1]); // gggccccgggaaaaac      lots of repetitions
-    const SEQ: DnaSlice = DnaSlice(&[2, 2, 1, 1, 1, 0, 0, 0, 0, 0, 3, 3]); // ggcccaaaatt
+    const STRANDED: bool = false;
+    const SEQ: DnaSlice = DnaSlice(&[2, 2, 2, 1, 1, 1, 1, 2, 2, 2, 0, 0, 0, 0, 0, 1]); // gggccccgggaaaaac
 
     #[ignore]
     #[test]
     fn print_graph() {
-        // seq -> node_list -> seq
         let graph = Graph::<Kmer3>::from_seq_serial(&SEQ, STRANDED);
         println!("{:?}", graph.base.sequences);
         graph.print();
@@ -361,6 +357,7 @@ mod unit_test {
         while let Some(node) = unitig_iter.next().unwrap() {
             path.push(node);
         }
+        // println!("{:?}", path);
         let path_seq = graph.sequence_of_path(path.iter());
         let seq = DnaString::from_bytes(SEQ.0);
         assert!(path_seq == seq);
@@ -373,6 +370,7 @@ mod unit_test {
         let seq = DnaString::from_bytes(SEQ.0);
         let graph = Graph::<Kmer3>::from_seq_serial(&SEQ, STRANDED);
         let path = ContinuousPath::encode_seq(&graph, &seq);
+        println!("Start node: {:?}", path.start_node);
         for ext in path.extensions.iter() {
             println!("{}", ext);
         }
