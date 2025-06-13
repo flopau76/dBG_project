@@ -107,6 +107,7 @@ impl Commands {
                     let record = record.unwrap();
                     let id = String::from_utf8_lossy(record.id());
                     eprintln!("Encoding record {}", id);
+                    println!(">{}", id);
                     let path = DiscontinuousPath::encode_record(&graph, &record, id.to_string());
                     path.append_to_binary(&mut output_writer).unwrap();
                 }

@@ -128,6 +128,7 @@ impl ContinuousPath {
                     length = target_pos - current_position;
                     shortest_path = nodes[target_pos];
                 }
+                println!("SP:{}:{:?}", length, shortest_path);
                 // if the shortest path is long enough, we use it to extend the path
                 if length >= MIN_PATH_LENGTH {
                     extensions.push(MyExtension::ShortestPath(shortest_path, length));
@@ -145,6 +146,7 @@ impl ContinuousPath {
             // add the repetition
             extensions.push(MyExtension::Repetition((repetition.1, repetition.2)));
             current_position += repetition.1 as usize;
+            println!("R:{}x{}", repetition.1, repetition.2);
         }
         extensions.pop(); // remove the sentinel
         ContinuousPath {
