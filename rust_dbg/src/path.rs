@@ -20,7 +20,7 @@ mod shortest_path;
 
 // for shortest path
 pub const MIN_PATH_LENGTH: usize = 1; // path encoded on 32 bits
-pub const MAX_PATH_LENGTH: usize = 60;
+
 // for repetitions
 pub const MIN_NB_REPEATS: u16 = 13; // repetition encoded on 24 bits
 pub const MAX_OFFSET: u8 = 255;
@@ -359,7 +359,7 @@ mod unit_test {
         while let Some(node) = unitig_iter.next().unwrap() {
             path.push(node);
         }
-        // println!("{:?}", path);
+        println!("{:?}", path);
         let path_seq = graph.sequence_of_path(path.iter());
         let seq = DnaString::from_bytes(SEQ.0);
         assert!(path_seq == seq);
