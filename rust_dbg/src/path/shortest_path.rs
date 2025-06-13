@@ -1,6 +1,7 @@
 //! Path finding algorithms for de Bruijn graphs
 
 use crate::graph::Graph;
+use crate::path::MAX_PATH_LENGTH;
 use crate::PathwayError;
 
 use debruijn::{Dir, Kmer};
@@ -162,7 +163,7 @@ pub fn get_next_target_node<K: Kmer>(
     }
 
     // look for duplicates in the path: a shortest path cannot pass through the same node twice
-    let mut shortcut = path.len();
+    let mut shortcut = std::cmp::min(path.len(), source_pos + MAX_PATH_LENGTH + 1);
     let mut seen = HashSet::new();
     for pos in source_pos..shortcut {
         if seen.contains(&path[pos]) {

@@ -20,6 +20,7 @@ mod shortest_path;
 
 // for shortest path
 pub const MIN_PATH_LENGTH: usize = 1; // path encoded on 32 bits
+pub const MAX_PATH_LENGTH: usize = 100; // path encoded on 32 bits
 
 // for repetitions
 pub const MIN_NB_REPEATS: u16 = 13; // repetition encoded on 24 bits
