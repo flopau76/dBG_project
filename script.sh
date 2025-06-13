@@ -7,8 +7,8 @@
 #SBATCH --mem=10G
 #SBATCH --partition=seqbio
 #SBATCH --qos=seqbio
-#SBATCH --output=%x_%j.out
-#SBATCH --error=%x_%j.err
+#SBATCH --output=%x_%A_%a.out
+#SBATCH --error=%x_%A_%a.err
 #SBATCH --array=1-8
 
 module purge

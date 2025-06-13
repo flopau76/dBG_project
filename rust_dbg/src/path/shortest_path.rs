@@ -140,7 +140,7 @@ fn get_ancestor_on_path(
     path: &[(usize, Dir)],
     node: &(usize, Dir),
 ) -> usize {
-    let mut parent = node;
+    let mut parent = parents.get(node).expect("Node not found in parents map");
     let mut pos = path.iter().position(|&x| x == *parent);
     while pos.is_none() {
         parent = parents
@@ -192,16 +192,23 @@ pub fn get_next_target_node<K: Kmer>(
                 pos_left += 1;
                 queue_left =
                     advance_bfs_simple(graph, Dir::Left, &mut queue_left, &mut visited_left);
-                // check if the two queues have met
+                // search for a shortcut...
+                // ...to the right side of the BFS
                 for node in &queue_left {
                     if parents_right.contains_key(node) {
-                        // find the last ancestor on the path
                         let pos = get_ancestor_on_path(
                             &parents_right,
                             &path[source_pos..=target_pos],
                             node,
                         ) + source_pos;
                         shortcut = std::cmp::min(shortcut, pos);
+                    }
+                }
+                // ...to a node on the right side of the path
+                for pos in pos_left + 1..shortcut {
+                    if visited_left.contains_key(&path[pos]) {
+                        shortcut = pos;
+                        break;
                     }
                 }
             } else {
@@ -212,16 +219,27 @@ pub fn get_next_target_node<K: Kmer>(
                 }
                 queue_right =
                     advance_bfs_parents(graph, Dir::Right, &mut queue_right, &mut parents_right);
-                // check if the two queues have met
+                // search for a shortcut...
+                // ...to the left side of the BFS
                 for node in queue_right.iter() {
                     if visited_left.contains_key(node) {
-                        // find the last ancestor on the path
                         let pos = get_ancestor_on_path(
                             &parents_right,
                             &path[source_pos..=target_pos],
                             node,
                         ) + source_pos;
                         shortcut = std::cmp::min(shortcut, pos);
+                    }
+                }
+                // ...to a node on the left side of the path
+                for left_node in &path[source_pos..pos_right] {
+                    if parents_right.contains_key(left_node) {
+                        let ancestor_pos = get_ancestor_on_path(
+                            &parents_right,
+                            &path[source_pos..=target_pos],
+                            left_node,
+                        ) + source_pos;
+                        shortcut = std::cmp::min(shortcut, ancestor_pos);
                     }
                 }
             }
