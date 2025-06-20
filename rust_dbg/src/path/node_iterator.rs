@@ -111,7 +111,7 @@ impl<'a, K: Kmer, D: Vmer> NodeIterator<'a, K, D> {
     }
 
     /// advance the iterator
-    pub fn advance(&mut self) -> Result<(), PathwayError<K>> {
+    fn advance(&mut self) -> Result<(), PathwayError<K>> {
         // get the next kmer in the iterator, if any
         let kmer = match self.kmer_iter.next() {
             Some(kmer) => kmer,

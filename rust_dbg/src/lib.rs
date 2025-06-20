@@ -6,6 +6,7 @@ pub mod graph;
 pub mod path;
 
 // pub use ... for re-exports
+// pub use debruijn::Dir;
 
 //####################################################################################
 //                              Custom errors                                       //

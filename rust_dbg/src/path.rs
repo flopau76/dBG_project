@@ -68,10 +68,10 @@ impl Display for MyExtension {
 }
 
 /// A struct that represents a continuous path in a de Bruijn graph using a start node and a list of extensions.
-#[derive(Serialize, Deserialize)]
-struct ContinuousPath {
-    pub start_node: (usize, Dir),
-    pub extensions: Vec<MyExtension>,
+#[derive(Serialize, Deserialize, Clone)]
+pub struct ContinuousPath {
+    start_node: (usize, Dir),
+    extensions: Vec<MyExtension>,
 }
 
 // Return a Vector of (start_position, nb_repeats, offset),
@@ -174,6 +174,59 @@ impl ContinuousPath {
         }
         result
     }
+
+    pub fn print_stats(&self) {
+        let mut nb_nn = 0;
+        let mut nb_r = 0;
+        let mut nb_sp = 0;
+        let mut nodes_r = 0;
+        let mut nodes_sp = 0;
+
+        for ext in self.extensions.iter() {
+            match ext {
+                MyExtension::NextNode(_) => {
+                    nb_nn += 1;
+                }
+                MyExtension::Repetition((nb_repeats, _offset)) => {
+                    nb_r += 1;
+                    nodes_r += *nb_repeats as usize;
+                }
+                MyExtension::ShortestPath(_target_node, length) => {
+                    nb_sp += 1;
+                    nodes_sp += *length;
+                }
+            }
+        }
+        // print the stats
+        const NN_COST: usize = 2;
+        const SP_COST: usize = 32;
+        const R_COST: usize = 24;
+
+        let total_nodes = nb_nn + nodes_r + nodes_sp;
+        let total_cost = NN_COST * nb_nn + SP_COST * nb_sp + R_COST * nb_r;
+
+        eprintln!("\n       Method | Number of encoded nodes | Memory cost");
+        eprintln!("--------------|-------------------------|-----------------");
+        for (name, nodes, cost) in [
+            ("Next node", nb_nn, NN_COST * nb_nn),
+            ("Shortest path", nodes_sp, SP_COST * nb_sp),
+            ("Repetition", nodes_r, R_COST * nb_r),
+        ] {
+            eprintln!(
+                "{:>13} | {:>14}  ({:>4.1}%) | {:>11} bits ({:>4.1}%)",
+                name,
+                format_int(nodes),
+                nodes as f64 / total_nodes as f64 * 100.0,
+                format_int(cost),
+                cost as f64 / total_cost as f64 * 100.0
+            );
+        }
+        eprintln!(
+            "        Total | {:>14}  ( 100%) | {:>11} bits ( 100%)",
+            format_int(total_nodes),
+            format_int(total_cost),
+        );
+    }
 }
 
 impl Display for ContinuousPath {
@@ -187,7 +240,7 @@ impl Display for ContinuousPath {
 pub struct DiscontinuousPath {
     id: String,
     sequences: Vec<ContinuousPath>,
-    masks: Vec<usize>,
+    masks: Vec<usize>, // number of 'N's before each sequence + at the end
 }
 
 impl DiscontinuousPath {
@@ -346,8 +399,11 @@ mod unit_test {
         assert_eq!(unitig_iter_end.start_offset, 4);
         assert_eq!(unitig_iter_end.end_offset, None);
 
+        // // unimplemented: if unitig does not correspond to the extremity of a node, it is not detected
         // let seq_middle = DnaString::from_dna_string("ccgg");
         // let unitig_iter_middle = NodeIterator::new(&graph, &seq_middle).unwrap();
+        // assert_eq!(unitig_iter_middle.start_offset, 2);
+        // assert_eq!(unitig_iter_middle.end_offset, Some(2));
     }
 
     #[test]
