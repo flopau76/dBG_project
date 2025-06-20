@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-#SBATCH --job-name=test_graphs
+#SBATCH --job-name=make_graphs
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
@@ -19,12 +19,14 @@ k=23
 
 
 # Define the paths to the files and executable
-path_data="./data/scerevisiae8"
-export PATH=$PATH:"$PWD/rust_dbg/target/release"
+path_data="./scerevisiae8"
+export PATH=$PATH:"../rust_dbg/target/release"
 
 path_fasta="$path_data/fasta.fa.gz"
 path_split="$path_data/splits"
 path_graphs="$path_data/graphs"
+
+mkdir -p $path_graphs
 
 #____________________________________________________
 # Split fasta by individuals
@@ -40,7 +42,6 @@ fasta_names=("$path_split"/*.fa.gz)
 IFS=$'\n' sorted_fasta_names=($(sort <<<"${fasta_names[*]}"))
 unset IFS
 
-mkdir -p $path_graphs
 for i in $(seq 1 ${#sorted_fasta_names[@]}); do
     srun ggcat build -k $k "${sorted_fasta_names[@]:0:i}" -o $path_graphs/n${i}_k${k}.fna --min-multiplicity 1 -j $SLURM_CPUS_PER_TASK
     srun rust_dbg -k $k -g $path_graphs/n${i}_k${k}.bin build -i $path_graphs/n${i}_k${k}.fna
