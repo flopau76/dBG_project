@@ -17,6 +17,8 @@ use std::fs::File;
 use std::io::{BufReader, BufWriter};
 use std::path::Path;
 
+use crate::Node;
+
 /// Wrapper around the DebruijnGraph from the debruijn crate.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Graph<K: Kmer>(DebruijnGraph<K, ()>);
@@ -62,22 +64,22 @@ impl<K: Kmer> Graph<K> {
     }
 
     /// Search a kmer at one side of the nodes
-    pub fn search_kmer(&self, kmer: K, side: Dir) -> Option<(usize, Dir)> {
+    pub fn search_kmer(&self, kmer: K, side: Dir) -> Option<Node> {
         match side {
             Dir::Left => self
                 .find_link(kmer, Dir::Right)
-                .map(|(id, dir, _)| (id, dir)),
+                .map(|(id, dir, _)| Node(id, dir)),
             Dir::Right => self
                 .find_link(kmer, Dir::Left)
-                .map(|(id, dir, _)| (id, dir.flip())),
+                .map(|(id, dir, _)| Node(id, dir.flip())),
         }
     }
 
     /// Search a kmer within the nodes, by iterating over all the graph. Returns ((node_id, dir), offset) where offset is counted from the given side.
-    pub fn search_kmer_offset(&self, kmer: K, side: Dir) -> Option<((usize, Dir), usize)> {
+    pub fn search_kmer_offset(&self, kmer: K, side: Dir) -> Option<(Node, usize)> {
         // search first at the given extremity
-        if let Some((node_id, dir)) = self.search_kmer(kmer, side) {
-            return Some(((node_id, dir), 0));
+        if let Some(node) = self.search_kmer(kmer, side) {
+            return Some((node, 0));
         }
         // if not found, iterate over all kmers
         let rc = kmer.rc();
@@ -88,7 +90,7 @@ impl<K: Kmer> Graph<K> {
                         Dir::Left => offset,
                         Dir::Right => self.get_node(node_id).len() - K::k() - offset,
                     };
-                    return Some(((node_id, side), offset));
+                    return Some((Node(node_id, side), offset));
                 }
                 // if not stranded, look for the reverse complement
                 else if !self.base.stranded && k == rc {
@@ -96,7 +98,7 @@ impl<K: Kmer> Graph<K> {
                         Dir::Left => self.get_node(node_id).len() - K::k() - offset,
                         Dir::Right => offset,
                     };
-                    return Some(((node_id, side.flip()), offset));
+                    return Some((Node(node_id, side.flip()), offset));
                 }
             }
         }

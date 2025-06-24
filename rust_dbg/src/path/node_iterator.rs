@@ -1,16 +1,46 @@
 //! Transform a dna sequence into a list of nodes in the graph
 
 use crate::graph::Graph;
-use crate::PathwayError;
+use crate::Node;
 
 use debruijn::dna_string::DnaString;
 use debruijn::{Dir, Kmer, KmerIter, Mer, Vmer};
 
-/// Iterator over a dna sequence, following the nodes in the graph. This will raise an error if the sequence from kmer_iter is not present in the graph.
+use std::error::Error;
+
+//####################################################################################
+//                              Custom errors                                       //
+//####################################################################################
+
+/// Custom error type for pathway search operations
+#[derive(Debug)]
+pub enum PathwayError<K> {
+    KmerNotFound(K),
+    UnitigNotMatching(DnaString, K, usize),
+}
+impl<K: Kmer> Error for PathwayError<K> {}
+impl<K: Kmer> std::fmt::Display for PathwayError<K> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PathwayError::KmerNotFound(kmer) => write!(f, "Kmer not found: {:?}", kmer),
+            PathwayError::UnitigNotMatching(seq, kmer, i) => write!(
+                f,
+                "Expected kmer {:?} at position {} in unitig {}",
+                kmer, i, seq
+            ),
+        }
+    }
+}
+
+//####################################################################################
+//                              Node Iterator                                       //
+//####################################################################################
+
+/// Iterator over nodes of a contig present in the graph.
 pub struct NodeIterator<'a, K: Kmer, D: Vmer> {
     graph: &'a Graph<K>,
     kmer_iter: KmerIter<'a, K, D>,
-    next_node: Option<(usize, Dir)>,
+    next_node: Option<Node>,
     pub start_offset: usize,
     pub end_offset: Option<usize>,
 }
@@ -52,7 +82,7 @@ impl<'a, K: Kmer, D: Vmer> NodeIterator<'a, K, D> {
                 };
                 let kmer = kmer.unwrap();
                 if node_seq.get(position) != kmer.get(K::k() - 1) {
-                    return Err(PathwayError::NodeNotMatching(
+                    return Err(PathwayError::UnitigNotMatching(
                         node_seq.to_owned(),
                         kmer,
                         position,
@@ -86,7 +116,7 @@ impl<'a, K: Kmer, D: Vmer> NodeIterator<'a, K, D> {
             if expected_seq != skipped_bases {
                 println!("skipped bases: {:?}", skipped_bases);
                 println!("expected bases: {:?}", expected_seq);
-                return Err(PathwayError::NodeNotMatching(expected_seq, kmer, 0));
+                return Err(PathwayError::UnitigNotMatching(expected_seq, kmer, 0));
                 // todo: proper values here
             }
         }
@@ -99,12 +129,12 @@ impl<'a, K: Kmer, D: Vmer> NodeIterator<'a, K, D> {
     }
 
     /// get the next node in the iterator, without advancing
-    pub fn peek(&self) -> Option<(usize, Dir)> {
+    pub fn peek(&self) -> Option<Node> {
         self.next_node
     }
 
     /// get the next node in the iterator, before advancing the iterator
-    pub fn next(&mut self) -> Result<Option<(usize, Dir)>, PathwayError<K>> {
+    pub fn next(&mut self) -> Result<Option<Node>, PathwayError<K>> {
         let next = self.next_node;
         self.advance()?;
         Ok(next)
@@ -144,7 +174,7 @@ impl<'a, K: Kmer, D: Vmer> NodeIterator<'a, K, D> {
                 }
             };
             if expected_base != kmer.get(K::k() - 1) {
-                return Err(PathwayError::NodeNotMatching(
+                return Err(PathwayError::UnitigNotMatching(
                     expected_seq.to_owned(),
                     kmer,
                     1,
@@ -156,7 +186,7 @@ impl<'a, K: Kmer, D: Vmer> NodeIterator<'a, K, D> {
 }
 
 impl<K: Kmer, D: Vmer> Iterator for NodeIterator<'_, K, D> {
-    type Item = (usize, Dir);
+    type Item = Node;
     fn next(&mut self) -> Option<Self::Item> {
         self.next().unwrap()
     }
