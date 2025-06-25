@@ -2,59 +2,12 @@
 This crates provides methods for the construction and the manipulation of de Bruijn graphs. It builds heavily upon the crate `debruijn` developped by 10x Genomics.
 */
 
-pub mod encoder;
+// pub mod encoder;
 pub mod graph;
+pub mod kmer;
 
 // pub use ... for re-exports;
-use debruijn::Dir;
 use std::io::Write;
-
-use crate::graph::{
-    node_iterator::{NodeIterator, PathwayError},
-    Graph,
-};
-
-//####################################################################################
-//                             Basic structures                                     //
-//####################################################################################
-
-/// Oriented node in a canonical de Bruijn graph
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Node(pub usize, pub Dir);
-
-impl Node {
-    /// Returns the id of the node
-    pub fn id(&self) -> usize {
-        self.0
-    }
-
-    /// Returns the orientation of the node: Left=canonical, Right=non-canonical
-    pub fn dir(&self) -> Dir {
-        self.1
-    }
-
-    pub fn to_string(&self) -> String {
-        format!("({}, {:?})", self.0, self.1)
-    }
-
-    pub fn from_string(s: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        let (id, dir) = s
-            .strip_prefix('(')
-            .and_then(|s| s.strip_suffix(')'))
-            .and_then(|s| s.split_once(','))
-            .ok_or(format!("Invalid node format: {}", s))?;
-
-        let id = id.parse::<usize>()?;
-
-        let dir = match dir.trim() {
-            "Left" => debruijn::Dir::Left,
-            "Right" => debruijn::Dir::Right,
-            other => return Err(format!("Invalid direction: {}", other).into()),
-        };
-
-        Ok(Self(id, dir))
-    }
-}
 
 //####################################################################################
 //                             Utility functions                                    //

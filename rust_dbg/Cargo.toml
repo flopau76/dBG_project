@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-debruijn = { git = "https://github.com/flopau76/rust-debruijn.git", branch = "master" }
+packed-seq = "3"
 boomphf = { version = "0.6", features = ["serde"] }
 serde = "1"
 bincode = "1.3"
