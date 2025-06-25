@@ -1,8 +1,6 @@
 //! Path finding algorithms for de Bruijn graphs
 
-use crate::graph::Graph;
-use crate::path::MAX_PATH_LENGTH;
-use crate::PathwayError;
+use crate::{Graph, Node, PathwayError};
 
 use debruijn::{Dir, Kmer};
 
@@ -12,15 +10,15 @@ use std::vec;
 
 // Advances the bfs by one depth and returns the new frontier set. Side indicates which end of the double-ended BFS is elongated.
 // The hasmap `visited` may contain additional information about the nodes, such as their parents or distances, provided the correct closure `f` is given.
-fn advance_bfs<K: Kmer, D, F>(
-    graph: &Graph<K>,
+fn advance_bfs<D, F>(
+    graph: &Graph<impl Kmer>,
     side: Dir,
-    queue: &mut Vec<(usize, Dir)>,
-    visited: &mut HashMap<(usize, Dir), D>,
+    queue: &mut Vec<Node>,
+    visited: &mut HashMap<Node, D>,
     f: F,
-) -> Vec<(usize, Dir)>
+) -> Vec<Node>
 where
-    F: Fn((usize, Dir)) -> D,
+    F: Fn(Node) -> D,
 {
     let mut next_queue = Vec::new();
     while let Some(current_node) = queue.pop() {
@@ -28,7 +26,7 @@ where
             .get_node(current_node.0)
             .edges(current_node.1.cond_flip(side == Dir::Left))
             .iter()
-            .map(|(neigh_id, neigh_dir, _)| (*neigh_id, neigh_dir.cond_flip(side != Dir::Left)))
+            .map(|(neigh_id, neigh_dir, _)| Node(*neigh_id, neigh_dir.cond_flip(side != Dir::Left)))
         {
             let entry = visited.entry(neigh_node);
             if let Entry::Vacant(e) = entry {
@@ -42,22 +40,22 @@ where
 }
 
 // marks the nodes as visited
-fn advance_bfs_simple<K: Kmer>(
-    graph: &Graph<K>,
+fn advance_bfs_simple(
+    graph: &Graph<impl Kmer>,
     side: Dir,
-    queue: &mut Vec<(usize, Dir)>,
-    visited: &mut HashMap<(usize, Dir), ()>,
-) -> Vec<(usize, Dir)> {
+    queue: &mut Vec<Node>,
+    visited: &mut HashMap<Node, ()>,
+) -> Vec<Node> {
     advance_bfs(graph, side, queue, visited, |_| ())
 }
 
 // marks the nodes as visited and stores their parents
-fn advance_bfs_parents<K: Kmer>(
-    graph: &Graph<K>,
+fn advance_bfs_parents(
+    graph: &Graph<impl Kmer>,
     side: Dir,
-    queue: &mut Vec<(usize, Dir)>,
-    parents: &mut HashMap<(usize, Dir), (usize, Dir)>,
-) -> Vec<(usize, Dir)> {
+    queue: &mut Vec<Node>,
+    parents: &mut HashMap<Node, Node>,
+) -> Vec<Node> {
     advance_bfs(graph, side, queue, parents, |current_node| (current_node))
 }
 
@@ -65,9 +63,9 @@ fn advance_bfs_parents<K: Kmer>(
 /// Note: results corresponds to ]start_node ... end_node]
 pub fn get_shortest_path<K: Kmer>(
     graph: &Graph<K>,
-    start_node: (usize, Dir),
-    end_node: (usize, Dir),
-) -> Result<Vec<(usize, Dir)>, PathwayError<K>> {
+    start_node: Node,
+    end_node: Node,
+) -> Result<Vec<Node>, PathwayError<K>> {
     // initialize the BFS
     let mut parents_left = HashMap::default();
     let mut parents_right = HashMap::default();
@@ -109,10 +107,7 @@ pub fn get_shortest_path<K: Kmer>(
         }
     }
 
-    if middle_node.is_none() {
-        return Err(PathwayError::NoPathExists);
-    }
-    let middle_node = middle_node.unwrap();
+    let middle_node = middle_node.expect("No path exists between the two nodes");
 
     // traceback left side by baktracking from the middle node
     let mut node = middle_node;
@@ -145,9 +140,9 @@ pub fn get_shortest_path<K: Kmer>(
 
 // Retuns the position-1 of the last ancestor of `node` on path[start_pos, end_pos].
 fn get_ancestor_on_path(
-    parents: &HashMap<(usize, Dir), (usize, Dir)>,
-    path: &[(usize, Dir)],
-    node: &(usize, Dir),
+    parents: &HashMap<Node, Node>,
+    path: &[Node],
+    node: &Node,
     start_pos: usize,
     end_pos: usize,
 ) -> usize {
@@ -170,16 +165,17 @@ fn get_ancestor_on_path(
 /// BFS is double-ended. If a shortcut is found, the right end is updated.
 pub fn get_next_target_node<K: Kmer>(
     graph: &Graph<K>,
-    path: &Vec<(usize, Dir)>,
+    path: &Vec<Node>,
     start_pos: usize,
-) -> Option<((usize, Dir), usize)> {
+    max_depth: usize,
+) -> Option<(Node, usize)> {
     // no need to encode further nodes
     if start_pos >= path.len() - 1 {
         return None;
     }
 
     // look for duplicates in the path: a shortest path cannot pass through the same node twice (except the first node)
-    let mut new_end_pos = std::cmp::min(start_pos + MAX_PATH_LENGTH, path.len() - 1);
+    let mut new_end_pos = std::cmp::min(start_pos + max_depth, path.len() - 1);
     let mut seen = HashSet::new();
     for (pos, node) in path[start_pos..=new_end_pos].iter().enumerate() {
         if seen.contains(node) {

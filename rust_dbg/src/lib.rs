@@ -4,15 +4,15 @@ This crates provides methods for the construction and the manipulation of de Bru
 
 pub mod encoder;
 pub mod graph;
-pub mod path;
 
 // pub use ... for re-exports;
-use debruijn::{dna_only_base_to_bits, Dir, DnaBytes, Kmer};
-use needletail::Sequence;
+use debruijn::Dir;
 use std::io::Write;
 
-pub use crate::graph::Graph;
-use crate::path::node_iterator::{NodeIterator, PathwayError};
+use crate::graph::{
+    node_iterator::{NodeIterator, PathwayError},
+    Graph,
+};
 
 //####################################################################################
 //                             Basic structures                                     //
@@ -56,73 +56,6 @@ impl Node {
     }
 }
 
-/// Contig in a de Bruijn graph, represented as a suite of nodes
-#[derive(Debug, Clone)]
-pub struct ContigNodes {
-    pub nodes: Vec<Node>,
-    pub start_offset: usize,
-    pub end_offset: usize,
-}
-
-impl ContigNodes {
-    /// Creates a ContigNodes from an ascii encoded sequence containing only ACGT bases.
-    pub fn from_sequence<'a, K: Kmer>(
-        sequence: &'a [u8],
-        graph: &graph::Graph<K>,
-    ) -> Result<Self, PathwayError<K>> {
-        let sequence_bits = DnaBytes(
-            sequence
-                .iter()
-                .map(|b| dna_only_base_to_bits(*b).expect("Contig contains non-ACGT base"))
-                .collect(),
-        );
-        let mut iterator = NodeIterator::new(graph, &sequence_bits)?;
-        let mut nodes = Vec::new();
-        while let Some(node) = iterator.next()? {
-            nodes.push(node);
-        }
-        Ok(Self {
-            nodes,
-            start_offset: iterator.start_offset,
-            end_offset: iterator.end_offset.expect("End offset should be set"),
-        })
-    }
-}
-
-/// Scaffold in a de Bruijn graph, represented as an alternance of NNNs and contigs
-#[derive(Debug, Clone)]
-pub struct ScaffoldNodes {
-    pub header: String,
-    pub contigs: Vec<(usize, ContigNodes)>,
-    pub end_gap: usize,
-}
-
-impl ScaffoldNodes {
-    /// Creates a ScaffoldNodes from an ascii encoded sequence.
-    pub fn from_string<'a, K: Kmer>(
-        header: String,
-        sequence: &'a [u8],
-        graph: &graph::Graph<K>,
-    ) -> Result<Self, PathwayError<K>> {
-        let mut contigs = Vec::new();
-        let mut count_n = 0;
-        for contig in sequence.normalize(false).split(|c| *c == b'N') {
-            if contig.is_empty() {
-                count_n += 1;
-                continue;
-            };
-            let contig = ContigNodes::from_sequence(&contig, graph)?;
-            contigs.push((count_n, contig));
-            count_n = 0;
-        }
-        Ok(Self {
-            header,
-            contigs,
-            end_gap: count_n,
-        })
-    }
-}
-
 //####################################################################################
 //                             Utility functions                                    //
 //####################################################################################
@@ -159,4 +92,35 @@ pub fn format_int(n: usize) -> String {
     }
 
     result.chars().rev().collect()
+}
+
+pub fn print_stats(nb_nn: usize, nb_r: usize, nb_sp: usize, nodes_r: usize, nodes_sp: usize) {
+    const NN_COST: usize = 2;
+    const SP_COST: usize = 32;
+    const R_COST: usize = 24;
+
+    let total_nodes = nb_nn + nodes_r + nodes_sp;
+    let total_cost = NN_COST * nb_nn + SP_COST * nb_sp + R_COST * nb_r;
+
+    eprintln!("\n       Method | Number of encoded nodes | Memory cost");
+    eprintln!("--------------|-------------------------|-----------------");
+    for (name, nodes, cost) in [
+        ("Next node", nb_nn, NN_COST * nb_nn),
+        ("Shortest path", nodes_sp, SP_COST * nb_sp),
+        ("Repetition", nodes_r, R_COST * nb_r),
+    ] {
+        eprintln!(
+            "{:>13} | {:>14}  ({:>4.1}%) | {:>11} bits ({:>4.1}%)",
+            name,
+            format_int(nodes),
+            nodes as f64 / total_nodes as f64 * 100.0,
+            format_int(cost),
+            cost as f64 / total_cost as f64 * 100.0
+        );
+    }
+    eprintln!(
+        "        Total | {:>14}  ( 100%) | {:>11} bits ( 100%)",
+        format_int(total_nodes),
+        format_int(total_cost),
+    );
 }

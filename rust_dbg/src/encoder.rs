@@ -1,17 +1,100 @@
-use crate::{Dir, Graph, Node};
-use debruijn::Kmer;
+use crate::{Graph, Node, NodeIterator, PathwayError};
+use debruijn::{dna_only_base_to_bits, DnaBytes, Kmer};
+use needletail::Sequence;
 use std::collections::VecDeque;
 
-mod shortest_path;
+use crate::graph::shortest_path;
 
-#[derive(Copy, Clone)]
-/// An enum containing all possible ways to encode a path extension.
-enum Extension {
+#[derive(Debug, Copy, Clone)]
+/// An enum containing different ways to encode a path extension.
+pub enum Extension {
     ShortestPath(Node),
     NextNode(Node),
     Repetition((u16, u8)), // nb_repeats, offset (-1)
 }
 
+/// An encoded suite of nodes, described as a start node and a list of extensions
+#[derive(Debug, Clone)]
+pub struct NodesEncoding {
+    start_node: Node,
+    extensions: Vec<Extension>,
+}
+
+impl NodesEncoding {
+    fn decode(&self, graph: &Graph<impl Kmer>) -> Vec<Node> {
+        let mut nodes = vec![self.start_node];
+        for extension in &self.extensions {
+            match extension {
+                Extension::ShortestPath(target_node) => {
+                    nodes.extend(
+                        shortest_path::get_shortest_path(
+                            graph,
+                            *nodes.last().unwrap(),
+                            *target_node,
+                        )
+                        .unwrap(),
+                    );
+                }
+                Extension::NextNode(nn) => nodes.push(*nn),
+                Extension::Repetition((nb_repeats, offset)) => {
+                    for _ in 0..*nb_repeats {
+                        let prev = nodes[nodes.len() - 1 - *offset as usize];
+                        nodes.push(prev);
+                    }
+                }
+            }
+        }
+        nodes
+    }
+
+    pub fn sequence(&self, graph: &Graph<impl Kmer>) -> String {
+        let nodes = self
+            .decode(graph)
+            .into_iter()
+            .map(|node| (node.id(), node.dir()))
+            .collect::<Vec<_>>();
+        unsafe { String::from_utf8_unchecked(graph.sequence_of_path(nodes.iter()).to_ascii_vec()) }
+    }
+}
+
+/// Contig in a de Bruijn graph, represented as a suite of nodes
+#[derive(Debug, Clone)]
+pub struct Contig {
+    pub nodes_encoding: NodesEncoding,
+    pub start_offset: usize,
+    pub end_offset: usize,
+}
+
+impl Contig {
+    /// Returns the sequence of the contig
+    pub fn sequence(&self, graph: &Graph<impl Kmer>) -> String {
+        let seq = self.nodes_encoding.sequence(graph);
+        seq[self.start_offset..seq.len() - self.end_offset].to_string()
+    }
+}
+
+/// Scaffold in a de Bruijn graph, represented as an alternance of contigs and gaps of a given size.
+#[derive(Debug, Clone)]
+pub struct Scaffold {
+    pub id: String,
+    pub contigs: Vec<(usize, Contig)>,
+    pub end_gap: usize,
+}
+
+impl Scaffold {
+    /// Returns the sequence of the scaffold
+    pub fn sequence(&self, graph: &Graph<impl Kmer>) -> String {
+        let mut seq = String::new();
+        for (gap_size, contig) in &self.contigs {
+            seq.push_str(&"N".repeat(*gap_size));
+            seq.push_str(&contig.sequence(graph));
+        }
+        seq.push_str(&"N".repeat(self.end_gap));
+        seq
+    }
+}
+
+/// Parameters for the encoder
 pub struct EncoderParams {
     pub min_sp_length: usize,
     pub max_sp_length: usize,
@@ -19,6 +102,7 @@ pub struct EncoderParams {
     pub max_offset: u8,
 }
 
+// TODO: add range verification for the parameters
 impl Default for EncoderParams {
     fn default() -> Self {
         Self {
@@ -30,28 +114,55 @@ impl Default for EncoderParams {
     }
 }
 
-/// Same as ContigNodes but with a list of extensions instead of nodes.
-pub struct ContigExtensions {
-    pub start_node: Node,
-    pub extensions: Vec<Extension>,
-    pub start_offset: usize,
-    pub end_offset: usize,
-}
-
-/// Same as ScaffoldNodes but with a list of extensions instead of contigs.
-pub struct ScaffoldExtensions {
-    pub header: String,
-    pub contigs: Vec<(usize, ContigExtensions)>,
-    pub end_gap: usize,
-}
-
+/// Encoder for paths in a de Bruijn graph.
 pub struct Encoder<'a, K: Kmer> {
-    params: EncoderParams,
-    graph: &'a Graph<K>,
+    pub params: EncoderParams,
+    pub graph: &'a Graph<K>,
 }
 
 impl<'a, K: Kmer> Encoder<'a, K> {
-    fn encode_contig(&self, nodes: &Vec<Node>) -> ContigExtensions {
+    /// Encode a scaffold from a sequence (containing non ACGT bases).
+    pub fn encode_record(&self, id: String, seq: &[u8]) -> Result<Scaffold, PathwayError<K>> {
+        let mut contigs = Vec::new();
+        let mut count_n = 0;
+        for contig in seq.normalize(false).split(|c| *c == b'N') {
+            if contig.is_empty() {
+                count_n += 1;
+                continue;
+            };
+            let contig = self.encode_contig(&contig)?;
+            contigs.push((count_n, contig));
+            count_n = 0;
+        }
+        Ok(Scaffold {
+            id,
+            contigs,
+            end_gap: count_n,
+        })
+    }
+
+    /// Encode a contig from a sequence (containing only ACGT bases).
+    fn encode_contig(&self, seq: &[u8]) -> Result<Contig, PathwayError<K>> {
+        let seq_bytes = seq
+            .iter()
+            .map(|b| dna_only_base_to_bits(*b).expect("Contig contains non-ACGT base"))
+            .collect::<Vec<_>>();
+        let seq_bits = DnaBytes(seq_bytes);
+        let mut iterator = NodeIterator::new(self.graph, &seq_bits)?;
+        let mut nodes = Vec::new();
+        while let Some(node) = iterator.next()? {
+            nodes.push(node);
+        }
+        let nodes_encoding = self.encode_path(&nodes);
+        Ok(Contig {
+            nodes_encoding,
+            start_offset: iterator.start_offset,
+            end_offset: iterator.end_offset.expect("End offset should be set"),
+        })
+    }
+
+    /// Encode a list of nodes using the different extensions.
+    fn encode_path(&self, nodes: &Vec<Node>) -> NodesEncoding {
         let start_node = nodes[0];
         let mut extensions = Vec::new();
 
@@ -62,9 +173,13 @@ impl<'a, K: Kmer> Encoder<'a, K> {
         while let Some(repetition) = repetitions.pop_front() {
             let target_pos = repetition.0 - 1;
             while current_position < target_pos {
-                let (mut shortest_path, mut length) =
-                    shortest_path::get_next_target_node(self.graph, &nodes, current_position)
-                        .unwrap();
+                let (mut shortest_path, mut length) = shortest_path::get_next_target_node(
+                    self.graph,
+                    &nodes,
+                    current_position,
+                    self.params.max_sp_length,
+                )
+                .unwrap();
                 if current_position + length >= target_pos {
                     length = target_pos - current_position;
                     shortest_path = nodes[target_pos];
@@ -90,45 +205,30 @@ impl<'a, K: Kmer> Encoder<'a, K> {
             println!("R:{}x{}", repetition.1, repetition.2);
         }
         extensions.pop(); // remove the sentinel
-        (start_node, extensions)
-    }
-
-    pub fn decode(&self, extensions: Vec<Extension>) -> Vec<Node> {
-        let nodes = vec![extensions[0].0];
-        todo!()
-                match self {
-            Extension::ShortestPath(target_node, _) => path.extend(
-                shortest_path::get_shortest_path(graph, *path.last().unwrap(), *target_node)
-                    .unwrap()
-                    .iter(),
-            ),
-            Extension::NextNode(nn) => path.push(*nn),
-            Extension::Repetition((nb_repeats, offset)) => {
-                for _ in 0..*nb_repeats {
-                    let prev = path[path.len() - 1 - *offset as usize];
-                    path.push(prev);
-                }
-            }
+        NodesEncoding {
+            start_node,
+            extensions,
         }
     }
 
-    // Return a Vector of (start_position, nb_repeats, offset),
-    // so that path[start_position .. start_position + nb_repeats] = path[start_position -1 - offset .. start_position + nb_repeats - 1- offset]
-    fn get_repetitions(&self, path: &Vec<Node>) -> VecDeque<(usize, u16, u8)> {
+    // Search for repetitions in a list using Lempel-Ziv
+    // Return a Vector of (start, nb_repeats, offset) so that list[start .. start + nb_repeats] = list[start-1 - offset .. start-1- offset + nb_repeats]
+    // Maximal offset and minimal number of repeats are defined in the parameters
+    fn get_repetitions<D: Eq>(&self, list: &Vec<D>) -> VecDeque<(usize, u16, u8)> {
         let mut repetitions = VecDeque::new();
         let mut current_pos = 1;
 
-        while current_pos < path.len() {
+        while current_pos < list.len() {
             let mut best_nb_repeats = 0;
             let mut best_offset = 0;
 
             // find the longest repetition in the sliding window
             for offset in 0..=(self.params.max_offset as usize).min(current_pos - 1) {
                 let mut nb_repeats = 0;
-                while path[current_pos - 1 - offset + nb_repeats] == path[current_pos + nb_repeats]
+                while list[current_pos - 1 - offset + nb_repeats] == list[current_pos + nb_repeats]
                 {
                     nb_repeats += 1;
-                    if current_pos + nb_repeats >= path.len() {
+                    if current_pos + nb_repeats >= list.len() {
                         break;
                     }
                 }

@@ -1,5 +1,5 @@
+use rust_dbg::encoder::{Encoder, EncoderParams};
 use rust_dbg::graph::Graph;
-use rust_dbg::path::DiscontinuousPath;
 
 use debruijn::{kmer, Kmer};
 use needletail::parse_fastx_file;
@@ -51,6 +51,18 @@ enum Commands {
         /// Path to the output file (custom text file)
         #[arg(short, long)]
         output: PathBuf,
+
+        /// Min repetition length to be used
+        #[arg(long, default_value_t = 13)]
+        min_rep: usize,
+
+        /// Min length for shortest path
+        #[arg(long, default_value_t = 1)]
+        min_depth: usize,
+
+        /// Max depth in Djikistra algorithm for shortest path
+        #[arg(long, default_value_t = 100)]
+        max_depth: usize,
     },
     /// Decode a path in the graph to retrieve the original sequence
     Decode {
@@ -98,37 +110,44 @@ impl Commands {
                 let graph = Graph::<K>::load_from_binary(&path_graph).unwrap();
                 graph.print_stats();
             }
-            Commands::Encode { input, output } => {
+            Commands::Encode {
+                input,
+                output,
+                min_rep,
+                min_depth,
+                max_depth,
+            } => {
                 let graph = Graph::<K>::load_from_binary(path_graph).unwrap();
                 let mut input_reader = parse_fastx_file(input).unwrap();
                 let mut output_writer = File::create(output).unwrap();
 
+                let encoder_params = EncoderParams {
+                    min_nb_repeats: *min_rep as u16,
+                    min_sp_length: *min_depth,
+                    max_sp_length: *max_depth,
+                    ..Default::default()
+                };
+                let encoder = Encoder {
+                    params: encoder_params,
+                    graph: &graph,
+                };
+
                 while let Some(record) = input_reader.next() {
                     let record = record.unwrap();
-                    let id = String::from_utf8_lossy(record.id());
+                    let id = unsafe { String::from_utf8_unchecked(record.id().to_owned()) };
+                    let seq = record.seq();
                     eprintln!("Encoding record {}", id);
                     println!(">{}", id);
-                    let path = DiscontinuousPath::encode_record(&graph, &record, id.to_string());
-                    path.append_to_binary(&mut output_writer).unwrap();
+                    let scaffold = encoder.encode_record(id, &seq).unwrap();
+                    todo!();
                 }
             }
             Commands::Decode { input, output } => {
-                let graph = Graph::<K>::load_from_binary(path_graph).unwrap();
-                let mut input_reader = BufReader::new(File::open(input).unwrap());
-                let mut output_writer = File::create(output).unwrap();
-
-                while let Ok(record) = DiscontinuousPath::load_from_binary(&mut input_reader) {
-                    let seq = record.decode_record(&graph);
-                    writeln!(output_writer, ">{}", record.header()).unwrap();
-                    writeln!(output_writer, "{}", seq.to_string()).unwrap();
-                }
+                todo!();
             }
             Commands::StatsP { input } => {
                 let mut input_reader = BufReader::new(File::open(input).unwrap());
-
-                while let Ok(record) = DiscontinuousPath::load_from_binary(&mut input_reader) {
-                    record.print_stats();
-                }
+                todo!();
             }
         }
     }

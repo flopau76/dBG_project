@@ -19,6 +19,9 @@ use std::path::Path;
 
 use crate::Node;
 
+pub mod node_iterator;
+pub mod shortest_path;
+
 /// Wrapper around the DebruijnGraph from the debruijn crate.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Graph<K: Kmer>(DebruijnGraph<K, ()>);
