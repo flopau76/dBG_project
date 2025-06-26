@@ -1,6 +1,3 @@
-use debruijn::dna_string::DnaString;
-use debruijn::kmer;
-
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 

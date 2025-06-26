@@ -35,96 +35,29 @@ impl std::fmt::Display for PathwayError {
 pub struct NodeIterator<'a, KS: KmerStorage> {
     graph: &'a Graph<KS>,
     seq: PackedSeqVec,
-    current_kmer: KS,
-    current_pos: usize,
+    next_pos: usize,
     next_node: Option<Node>,
-    pub start_offset: usize,
+    pub start_offset: Option<usize>,
     pub end_offset: Option<usize>,
 }
 
 impl<'a, KS: KmerStorage> NodeIterator<'a, KS> {
-    pub fn new(graph: &Graph<KS>, seq: PackedSeqVec) -> Result<Self, PathwayError> {
+    pub fn new(graph: &'a Graph<KS>, seq: PackedSeqVec) -> Result<Self, PathwayError> {
         let mut node_iter = Self {
             graph,
             seq,
-            current_kmer: KS::new(),
-            current_pos: 0,
+            next_pos: 0,
             next_node: None,
-            start_offset: 0,
+            start_offset: None,
             end_offset: None,
         };
-
-        // compute the first kmer from the sequence
-        while node_iter.current_pos < graph.k() {
-            node_iter
-                .current_kmer
-                .extend_right(graph.k, seq.as_slice().get(node_iter.current_pos));
-            node_iter.current_pos += 1;
-        }
-        // search for the kmer at the start of a node
-        let node = graph.search_kmer(&node_iter.current_kmer, Side::Left);
-
-        // first kmer corresponds to the start of a node
-        if node.is_some() {
-            node_iter.next_node = node;
-            let node = node.unwrap();
-            let node_seq = graph.node_seq(node);
-
-            // seq contains only a single node
-            if seq.len() <= node_seq.len() {
-                node_iter.end_offset = Some(node_seq.len() - seq.len());
-            }
-
-            // check that the suite of the sequence matches the node sequence
-            let node_end = min(node_seq.len(), seq.len());
-            let expected_seq = node_seq.slice(Range {
-                start: graph.k(),
-                end: node_end,
-            });
-            let actual_seq = seq.slice(Range {
-                start: graph.k(),
-                end: node_end,
-            });
-            if expected_seq != actual_seq {
-                return Err(PathwayError::UnitigNotMatching);
-            }
-        }
-        // first kmer does not correspond to the start of a node
-        // => advance in the sequence until we find the last kmer of a node
-        else {
-            let mut node = graph.search_kmer(kmer, Dir::Right);
-            let mut skipped_bases = DnaString::new();
-            while node.is_none() {
-                skipped_bases.push(kmer.get(0));
-                kmer = node_iter
-                    .kmer_iter
-                    .next()
-                    .expect("sequence contains neither begining nor end of a node");
-                node = graph.search_kmer(kmer, Dir::Right);
-            }
-            node_iter.next_node = node;
-            let node = node.unwrap();
-            let node_seq = match node.1 {
-                Dir::Left => graph.get_node(node.0).sequence(),
-                Dir::Right => graph.get_node(node.0).sequence().rc(),
-            };
-            node_iter.start_offset = node_seq.len() - skipped_bases.len() - K::k();
-            let expected_seq = node_seq
-                .slice(node_iter.start_offset, node_seq.len() - K::k())
-                .to_owned();
-            if expected_seq != skipped_bases {
-                println!("skipped bases: {:?}", skipped_bases);
-                println!("expected bases: {:?}", expected_seq);
-                return Err(PathwayError::UnitigNotMatching(expected_seq, kmer, 0));
-                // todo: proper values here
-            }
-        }
+        node_iter.advance()?;
         Ok(node_iter)
     }
 
     /// get the start position (in nucleotides) of the next node in the iterator
     pub fn position(&self) -> usize {
-        self.kmer_iter.pos - K::k()
+        self.next_pos
     }
 
     /// get the next node in the iterator, without advancing
@@ -141,50 +74,84 @@ impl<'a, KS: KmerStorage> NodeIterator<'a, KS> {
 
     /// advance the iterator
     fn advance(&mut self) -> Result<(), PathwayError> {
-        // get the next kmer in the iterator, if any
-        let kmer = match self.kmer_iter.next() {
-            Some(kmer) => kmer,
-            None => {
-                self.next_node = None;
-                return Ok(());
-            }
-        };
-        // look for the kmer at the beginning of the unitigs
-        let node = self
-            .graph
-            .search_kmer(kmer, Dir::Left)
-            .ok_or(PathwayError::KmerNotFound(kmer))?;
-        self.next_node = Some(node);
-        // get the sequence of this node
-        let expected_seq = match node.1 {
-            Dir::Left => self.graph.get_node(node.0).sequence(),
-            Dir::Right => self.graph.get_node(node.0).sequence().rc(),
-        };
-        let expected_seq = expected_seq.slice(K::k(), expected_seq.len());
+        // check if we reached the end of the sequence
+        if self.next_pos + self.graph.k() >= self.seq.len() {
+            self.next_node = None;
+            return Ok(());
+        }
 
-        // advance the kmer iterator to the end of this node and
-        // check that the sequence from kmer_iter coincides with the whole node, not only with its first kmer
-        for (idx, expected_base) in expected_seq.iter().enumerate() {
-            let kmer = match self.kmer_iter.next() {
-                Some(kmer) => kmer,
-                None => {
-                    self.end_offset = Some(expected_seq.len() - idx);
-                    break;
-                }
-            };
-            if expected_base != kmer.get(K::k() - 1) {
-                return Err(PathwayError::UnitigNotMatching(
-                    expected_seq.to_owned(),
-                    kmer,
-                    1,
-                ));
+        // search for the next kmer at the start of a node
+        let mut kmer = KS::get_kmer(self.graph.k(), self.seq.as_slice(), self.next_pos);
+        let node = self.graph.search_kmer(kmer, Side::Left);
+
+        // kmer corresponds to the start of a node
+        if node.is_some() {
+            self.next_node = node;
+            let node = node.unwrap();
+            let node_seq = self.graph.node_seq(node);
+
+            // check that the rest of the node sequence matches the input sequence
+            let nb_bases = min(node_seq.len(), self.seq.len() - self.next_pos);
+            let expected_seq = node_seq.slice(Range {
+                start: self.graph.k(),
+                end: nb_bases,
+            });
+            let actual_seq = self.seq.slice(Range {
+                start: self.next_pos + self.graph.k(),
+                end: self.next_pos + nb_bases,
+            });
+            if expected_seq != actual_seq {
+                return Err(PathwayError::UnitigNotMatching);
             }
+            self.next_pos += node_seq.len() - self.graph.k() + 1;
+            if self.start_offset.is_none() {
+                self.start_offset = Some(0);
+            }
+        }
+        // first kmer does not correspond to the start of a node
+        else {
+            if self.start_offset.is_none() {
+                return Err(PathwayError::KmerNotFound(String::from("TODO")));
+            }
+            // the node_iterator has not been initialized yet. We might have an offset in the first node
+            // advance in the sequence until we find the last kmer of a node
+            let mut node = self.graph.search_kmer(kmer, Side::Right);
+            while node.is_none() {
+                if self.next_pos + self.graph.k() >= self.seq.len() {
+                    panic!("sequence contains neither begining nor end of a node")
+                }
+                kmer.extend_right(
+                    self.graph.k(),
+                    self.seq.as_slice().get(self.next_pos + self.graph.k()),
+                );
+                self.next_pos += 1;
+                node = self.graph.search_kmer(kmer, Side::Right);
+            }
+            // we found the end of a node
+            self.next_node = node;
+            let node = node.unwrap();
+            let node_seq = self.graph.node_seq(node);
+            self.start_offset = Some(node_seq.len() - self.next_pos - self.graph.k());
+
+            // check that the beginning of the node sequence matches the input sequence
+            let expected_seq = node_seq.slice(Range {
+                start: self.start_offset.unwrap(),
+                end: self.start_offset.unwrap() + self.next_pos,
+            });
+            let actual_seq = self.seq.slice(Range {
+                start: 0,
+                end: self.next_pos,
+            });
+            if expected_seq != actual_seq {
+                return Err(PathwayError::UnitigNotMatching);
+            }
+            self.next_pos += 1;
         }
         Ok(())
     }
 }
 
-impl Iterator for NodeIterator<'_> {
+impl<KS: KmerStorage> Iterator for NodeIterator<'_, KS> {
     type Item = Node;
     fn next(&mut self) -> Option<Self::Item> {
         self.next().unwrap()
