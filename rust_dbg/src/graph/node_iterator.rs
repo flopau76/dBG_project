@@ -1,31 +1,10 @@
 //! Transform a dna sequence into a list of nodes in the graph
 
-use super::{Graph, Node, Side};
-use crate::kmer::KmerStorage;
+use crate::{Graph, KmerStorage, Node, PathwayError, Side};
 
 use packed_seq::{PackedSeqVec, Seq, SeqVec};
 
-use std::{cmp::min, error::Error, ops::Range};
-
-//####################################################################################
-//                              Custom errors                                       //
-//####################################################################################
-
-/// Custom error type for pathway search operations
-#[derive(Debug)]
-pub enum PathwayError {
-    KmerNotFound(String),
-    UnitigNotMatching,
-}
-impl Error for PathwayError {}
-impl std::fmt::Display for PathwayError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            PathwayError::KmerNotFound(kmer) => write!(f, "Kmer not found: {}", kmer),
-            PathwayError::UnitigNotMatching => write!(f, "Unitig not matching"),
-        }
-    }
-}
+use std::{cmp::min, ops::Range};
 
 //####################################################################################
 //                              Node Iterator                                       //

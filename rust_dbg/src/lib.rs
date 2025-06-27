@@ -3,13 +3,15 @@ This crates provides methods for the construction and the manipulation of de Bru
 */
 
 // pub mod encoder;
+pub mod encoder;
 pub mod graph;
 pub mod kmer;
 
 // pub use ... for re-exports;
 use std::io::Write;
 
-pub use graph::Side;
+pub use graph::{BaseGraph, Graph, Node, NodeIterator, PathwayError, Side};
+pub use kmer::KmerStorage;
 
 //####################################################################################
 //                             Utility functions                                    //

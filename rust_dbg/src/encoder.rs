@@ -1,9 +1,9 @@
-use crate::{Graph, Node, NodeIterator, PathwayError};
-use debruijn::{dna_only_base_to_bits, DnaBytes, Kmer};
-use needletail::Sequence;
-use std::collections::VecDeque;
-
 use crate::graph::shortest_path;
+use crate::{Graph, KmerStorage, Node, NodeIterator, PathwayError};
+
+use needletail::Sequence;
+use packed_seq::{PackedSeqVec, SeqVec};
+use std::collections::VecDeque;
 
 #[derive(Debug, Copy, Clone)]
 /// An enum containing different ways to encode a path extension.
@@ -21,7 +21,7 @@ pub struct NodesEncoding {
 }
 
 impl NodesEncoding {
-    fn decode(&self, graph: &Graph<impl Kmer>) -> Vec<Node> {
+    fn decode(&self, graph: &Graph<impl KmerStorage>) -> Vec<Node> {
         let mut nodes = vec![self.start_node];
         for extension in &self.extensions {
             match extension {
@@ -47,13 +47,10 @@ impl NodesEncoding {
         nodes
     }
 
-    pub fn sequence(&self, graph: &Graph<impl Kmer>) -> String {
-        let nodes = self
-            .decode(graph)
-            .into_iter()
-            .map(|node| (node.id(), node.dir()))
-            .collect::<Vec<_>>();
-        unsafe { String::from_utf8_unchecked(graph.sequence_of_path(nodes.iter()).to_ascii_vec()) }
+    pub fn sequence(&self, graph: &Graph<impl KmerStorage>) -> String {
+        let nodes = self.decode(graph);
+        let seq = graph.path_seq(&nodes);
+        unsafe { String::from_utf8_unchecked(seq.as_slice().unpack()) }
     }
 }
 
@@ -67,7 +64,7 @@ pub struct Contig {
 
 impl Contig {
     /// Returns the sequence of the contig
-    pub fn sequence(&self, graph: &Graph<impl Kmer>) -> String {
+    pub fn sequence(&self, graph: &Graph<impl KmerStorage>) -> String {
         let seq = self.nodes_encoding.sequence(graph);
         seq[self.start_offset..seq.len() - self.end_offset].to_string()
     }
@@ -83,7 +80,7 @@ pub struct Scaffold {
 
 impl Scaffold {
     /// Returns the sequence of the scaffold
-    pub fn sequence(&self, graph: &Graph<impl Kmer>) -> String {
+    pub fn sequence(&self, graph: &Graph<impl KmerStorage>) -> String {
         let mut seq = String::new();
         for (gap_size, contig) in &self.contigs {
             seq.push_str(&"N".repeat(*gap_size));
@@ -115,14 +112,14 @@ impl Default for EncoderParams {
 }
 
 /// Encoder for paths in a de Bruijn graph.
-pub struct Encoder<'a, K: Kmer> {
+pub struct Encoder<'a, K: KmerStorage> {
     pub params: EncoderParams,
     pub graph: &'a Graph<K>,
 }
 
-impl<'a, K: Kmer> Encoder<'a, K> {
+impl<'a, K: KmerStorage> Encoder<'a, K> {
     /// Encode a scaffold from a sequence (containing non ACGT bases).
-    pub fn encode_record(&self, id: String, seq: &[u8]) -> Result<Scaffold, PathwayError<K>> {
+    pub fn encode_record(&self, id: String, seq: &[u8]) -> Result<Scaffold, PathwayError> {
         let mut contigs = Vec::new();
         let mut count_n = 0;
         for contig in seq.normalize(false).split(|c| *c == b'N') {
@@ -142,13 +139,9 @@ impl<'a, K: Kmer> Encoder<'a, K> {
     }
 
     /// Encode a contig from a sequence (containing only ACGT bases).
-    fn encode_contig(&self, seq: &[u8]) -> Result<Contig, PathwayError<K>> {
-        let seq_bytes = seq
-            .iter()
-            .map(|b| dna_only_base_to_bits(*b).expect("Contig contains non-ACGT base"))
-            .collect::<Vec<_>>();
-        let seq_bits = DnaBytes(seq_bytes);
-        let mut iterator = NodeIterator::new(self.graph, &seq_bits)?;
+    fn encode_contig(&self, seq: &[u8]) -> Result<Contig, PathwayError> {
+        let seq = PackedSeqVec::from_ascii(seq);
+        let mut iterator = NodeIterator::new(self.graph, seq)?;
         let mut nodes = Vec::new();
         while let Some(node) = iterator.next()? {
             nodes.push(node);
@@ -156,7 +149,7 @@ impl<'a, K: Kmer> Encoder<'a, K> {
         let nodes_encoding = self.encode_path(&nodes);
         Ok(Contig {
             nodes_encoding,
-            start_offset: iterator.start_offset,
+            start_offset: iterator.start_offset.expect("Start offset should be set"),
             end_offset: iterator.end_offset.expect("End offset should be set"),
         })
     }

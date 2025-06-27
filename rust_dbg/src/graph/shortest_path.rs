@@ -1,18 +1,15 @@
 //! Path finding algorithms for de Bruijn graphs
 
-use crate::{Graph, Node, PathwayError};
+use crate::{Graph, KmerStorage, Node, PathwayError, Side};
 
-use debruijn::{Dir, Kmer};
-
-use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
+use std::collections::{hash_map::Entry, HashMap, HashSet};
 use std::vec;
 
 // Advances the bfs by one depth and returns the new frontier set. Side indicates which end of the double-ended BFS is elongated.
 // The hasmap `visited` may contain additional information about the nodes, such as their parents or distances, provided the correct closure `f` is given.
 fn advance_bfs<D, F>(
-    graph: &Graph<impl Kmer>,
-    side: Dir,
+    graph: &Graph<impl KmerStorage>,
+    side: Side,
     queue: &mut Vec<Node>,
     visited: &mut HashMap<Node, D>,
     f: F,
@@ -22,12 +19,7 @@ where
 {
     let mut next_queue = Vec::new();
     while let Some(current_node) = queue.pop() {
-        for neigh_node in graph
-            .get_node(current_node.0)
-            .edges(current_node.1.cond_flip(side == Dir::Left))
-            .iter()
-            .map(|(neigh_id, neigh_dir, _)| Node(*neigh_id, neigh_dir.cond_flip(side != Dir::Left)))
-        {
+        for neigh_node in graph.node_neigh(current_node, side) {
             let entry = visited.entry(neigh_node);
             if let Entry::Vacant(e) = entry {
                 let neigh_d = f(current_node);
@@ -41,8 +33,8 @@ where
 
 // marks the nodes as visited
 fn advance_bfs_simple(
-    graph: &Graph<impl Kmer>,
-    side: Dir,
+    graph: &Graph<impl KmerStorage>,
+    side: Side,
     queue: &mut Vec<Node>,
     visited: &mut HashMap<Node, ()>,
 ) -> Vec<Node> {
@@ -51,8 +43,8 @@ fn advance_bfs_simple(
 
 // marks the nodes as visited and stores their parents
 fn advance_bfs_parents(
-    graph: &Graph<impl Kmer>,
-    side: Dir,
+    graph: &Graph<impl KmerStorage>,
+    side: Side,
     queue: &mut Vec<Node>,
     parents: &mut HashMap<Node, Node>,
 ) -> Vec<Node> {
@@ -61,11 +53,11 @@ fn advance_bfs_parents(
 
 /// Get the shortest path between two nodes, using a double-ended BFS.
 /// Note: results corresponds to ]start_node ... end_node]
-pub fn get_shortest_path<K: Kmer>(
+pub fn get_shortest_path<K: KmerStorage>(
     graph: &Graph<K>,
     start_node: Node,
     end_node: Node,
-) -> Result<Vec<Node>, PathwayError<K>> {
+) -> Result<Vec<Node>, PathwayError> {
     // initialize the BFS
     let mut parents_left = HashMap::default();
     let mut parents_right = HashMap::default();
@@ -77,7 +69,7 @@ pub fn get_shortest_path<K: Kmer>(
     'kmer: while !queue_left.is_empty() && !queue_right.is_empty() {
         if queue_left.len() <= queue_right.len() {
             // elongate from the left
-            queue_left = advance_bfs_parents(graph, Dir::Left, &mut queue_left, &mut parents_left);
+            queue_left = advance_bfs_parents(graph, Side::Left, &mut queue_left, &mut parents_left);
             // check if the two queues have met
             for node in &queue_left {
                 if parents_right.contains_key(node) {
@@ -92,7 +84,7 @@ pub fn get_shortest_path<K: Kmer>(
         } else {
             // elongate from the right
             queue_right =
-                advance_bfs_parents(graph, Dir::Right, &mut queue_right, &mut parents_right);
+                advance_bfs_parents(graph, Side::Right, &mut queue_right, &mut parents_right);
             // check if the two queues have met
             for node in &queue_right {
                 if parents_left.contains_key(node) {
@@ -163,7 +155,7 @@ fn get_ancestor_on_path(
 
 /// Perform a BFS to find the next target_node to elongate `path` from `source_pos`.  
 /// BFS is double-ended. If a shortcut is found, the right end is updated.
-pub fn get_next_target_node<K: Kmer>(
+pub fn get_next_target_node<K: KmerStorage>(
     graph: &Graph<K>,
     path: &Vec<Node>,
     start_pos: usize,
@@ -207,7 +199,7 @@ pub fn get_next_target_node<K: Kmer>(
                 // elongate from the left
                 pos_left += 1;
                 queue_left =
-                    advance_bfs_simple(graph, Dir::Left, &mut queue_left, &mut visited_left);
+                    advance_bfs_simple(graph, Side::Left, &mut queue_left, &mut visited_left);
                 // check if we found a shortcut
                 // ... to the right side of the path
                 for (i, node) in path[pos_left + 1..=end_pos].iter().enumerate() {
@@ -229,7 +221,7 @@ pub fn get_next_target_node<K: Kmer>(
                 // elongate from the right
                 pos_right -= 1;
                 queue_right =
-                    advance_bfs_parents(graph, Dir::Right, &mut queue_right, &mut parents_right);
+                    advance_bfs_parents(graph, Side::Right, &mut queue_right, &mut parents_right);
                 // check if we found a shortcut
                 // ... to the BFS from the left
                 for node in queue_right.iter() {

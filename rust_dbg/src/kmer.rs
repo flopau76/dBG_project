@@ -112,7 +112,7 @@ impl IntHelp for u8 {
     }
 }
 
-pub trait KmerStorage: Sized + IntHelp + Copy + Clone + Hash + Debug + Eq {
+pub trait KmerStorage: Sized + IntHelp + Copy + Clone + Hash + Debug + Eq + Send + Sync {
     /// Create a new empty k-mer storage.
     fn new() -> Self;
     /// Extend the k-mer to the left by adding a base, given its 2-bit encoding.
