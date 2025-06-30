@@ -10,7 +10,7 @@ use std::{cmp::min, ops::Range};
 //                              Node Iterator                                       //
 //####################################################################################
 
-/// Iterator over nodes of a contig present in the graph.
+/// Iterator over nodes spelling a given sequence.
 pub struct NodeIterator<'a, KS: KmerStorage> {
     graph: &'a Graph<KS>,
     seq: PackedSeqVec,
@@ -63,11 +63,6 @@ impl<'a, KS: KmerStorage> NodeIterator<'a, KS> {
         // search for the next kmer at the start of a node
         let mut kmer = KS::get_kmer(self.graph.k(), self.seq.as_slice(), self.next_pos);
         let node = self.graph.search_kmer(kmer, Side::Left);
-
-        println!(
-            "next_pos: {}, kmer: {:?}, node: {:?}",
-            self.next_pos, kmer, node
-        );
 
         // kmer corresponds to the start of a node
         if node.is_some() {

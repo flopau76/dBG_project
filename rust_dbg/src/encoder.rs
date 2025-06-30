@@ -1,16 +1,29 @@
 use crate::graph::shortest_path;
-use crate::{Graph, KmerStorage, Node, NodeIterator, PathwayError};
+use crate::{Graph, KmerStorage, Node, NodeIterator, PathwayError, Side};
 
 use needletail::Sequence;
-use packed_seq::{PackedSeqVec, SeqVec};
+use packed_seq::{PackedSeqVec, Seq, SeqVec};
 use std::collections::VecDeque;
+use std::fmt::Debug;
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Copy, Clone)]
 /// An enum containing different ways to encode a path extension.
 pub enum Extension {
     ShortestPath(Node),
-    NextNode(Node),
+    NextNucleotide(u8),
     Repetition((u16, u8)), // nb_repeats, offset (-1)
+}
+
+impl Debug for Extension {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Extension::ShortestPath(node) => write!(f, "SP({:?})", node),
+            Extension::NextNucleotide(base) => write!(f, "NN({})", base),
+            Extension::Repetition((nb_repeats, offset)) => {
+                write!(f, "R({}-{})", nb_repeats, offset)
+            }
+        }
+    }
 }
 
 /// An encoded suite of nodes, described as a start node and a list of extensions
@@ -21,7 +34,7 @@ pub struct NodesEncoding {
 }
 
 impl NodesEncoding {
-    fn decode(&self, graph: &Graph<impl KmerStorage>) -> Vec<Node> {
+    pub fn decode(&self, graph: &Graph<impl KmerStorage>) -> Vec<Node> {
         let mut nodes = vec![self.start_node];
         for extension in &self.extensions {
             match extension {
@@ -35,12 +48,20 @@ impl NodesEncoding {
                         .unwrap(),
                     );
                 }
-                Extension::NextNode(nn) => nodes.push(*nn),
                 Extension::Repetition((nb_repeats, offset)) => {
                     for _ in 0..*nb_repeats {
                         let prev = nodes[nodes.len() - 1 - *offset as usize];
                         nodes.push(prev);
                     }
+                }
+                Extension::NextNucleotide(base) => {
+                    let last_node = *nodes.last().unwrap();
+                    let mut kmer = graph.node_kmer(last_node, Side::Right);
+                    kmer.extend_right(graph.k(), *base);
+                    let next_node = graph
+                        .search_kmer(kmer, Side::Left)
+                        .expect("Next node should exist");
+                    nodes.push(next_node);
                 }
             }
         }
@@ -98,18 +119,6 @@ pub struct EncoderParams {
     pub max_offset: u8,
 }
 
-// TODO: add range verification for the parameters
-impl Default for EncoderParams {
-    fn default() -> Self {
-        Self {
-            min_sp_length: 1,
-            max_sp_length: 100,
-            min_nb_repeats: 10,
-            max_offset: 255,
-        }
-    }
-}
-
 /// Encoder for paths in a de Bruijn graph.
 pub struct Encoder<'a, K: KmerStorage> {
     pub params: EncoderParams,
@@ -138,7 +147,7 @@ impl<'a, K: KmerStorage> Encoder<'a, K> {
     }
 
     /// Encode a contig from a sequence (containing only ACGT bases).
-    fn encode_contig(&self, seq: &[u8]) -> Result<Contig, PathwayError> {
+    pub fn encode_contig(&self, seq: &[u8]) -> Result<Contig, PathwayError> {
         let seq = PackedSeqVec::from_ascii(seq);
         let mut iterator = NodeIterator::new(self.graph, seq)?;
         let mut nodes = Vec::new();
@@ -154,7 +163,7 @@ impl<'a, K: KmerStorage> Encoder<'a, K> {
     }
 
     /// Encode a list of nodes using the different extensions.
-    fn encode_path(&self, nodes: &Vec<Node>) -> NodesEncoding {
+    pub fn encode_path(&self, nodes: &Vec<Node>) -> NodesEncoding {
         let start_node = nodes[0];
         let mut extensions = Vec::new();
 
@@ -165,7 +174,7 @@ impl<'a, K: KmerStorage> Encoder<'a, K> {
         while let Some(repetition) = repetitions.pop_front() {
             let target_pos = repetition.0 - 1;
             while current_position < target_pos {
-                let (mut shortest_path, mut length) = shortest_path::get_next_target_node(
+                let (mut target_node, mut length) = shortest_path::get_next_target_node(
                     self.graph,
                     &nodes,
                     current_position,
@@ -174,27 +183,35 @@ impl<'a, K: KmerStorage> Encoder<'a, K> {
                 .unwrap();
                 if current_position + length >= target_pos {
                     length = target_pos - current_position;
-                    shortest_path = nodes[target_pos];
+                    target_node = nodes[target_pos];
                 }
-                println!("SP:{}:{:?}", length, shortest_path);
                 // if the shortest path is long enough, we use it to extend the path
                 if length >= self.params.min_sp_length {
-                    extensions.push(Extension::ShortestPath(shortest_path));
+                    let ext = Extension::ShortestPath(target_node);
+                    println!("{:?}:{}", ext, length);
+                    extensions.push(ext);
                 }
                 // otherwise, we encode its nodes directly (2 bits per node)
                 else {
                     extensions.extend(
                         nodes[current_position + 1..current_position + 1 + length]
                             .iter()
-                            .map(|&node| Extension::NextNode(node)),
+                            .map(|&node| {
+                                let ext = Extension::NextNucleotide(
+                                    self.graph.node_seq(node).as_slice().get(self.graph.k() - 1),
+                                );
+                                println!("{:?}", ext);
+                                ext
+                            }),
                     );
                 }
                 current_position += length as usize;
             }
             // add the repetition
-            extensions.push(Extension::Repetition((repetition.1, repetition.2)));
+            let ext = Extension::Repetition((repetition.1, repetition.2));
+            println!("{:?}", ext);
+            extensions.push(ext);
             current_position += repetition.1 as usize;
-            println!("R:{}x{}", repetition.1, repetition.2);
         }
         extensions.pop(); // remove the sentinel
         NodesEncoding {

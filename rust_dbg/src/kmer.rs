@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 use std::hash::Hash;
 
-use packed_seq::{PackedSeq, Seq};
+use packed_seq::{unpack_base, PackedSeq, Seq};
 
 use crate::Side;
 
@@ -113,10 +113,14 @@ impl IntHelp for u8 {
 }
 
 pub trait KmerStorage: Sized + IntHelp + Copy + Clone + Hash + Debug + Eq + Send + Sync {
+    /// Maximal number of nucleotides that can be stored in this type.
+    fn capacity() -> usize;
     /// Create a new empty k-mer storage.
     fn new() -> Self;
     /// Extend the k-mer to the left by adding a base, given its 2-bit encoding.
     fn extend_left(&mut self, k: usize, base: u8);
+    /// Print the k-mer as a string of bases.
+    fn print(&self, k: usize) -> String;
     /// Extend the k-mer to the right by adding a base, given its 2-bit encoding.
     fn extend_right(&mut self, k: usize, base: u8);
     /// Extend the k-mer to the given `side`.
@@ -153,16 +157,18 @@ pub trait KmerStorage: Sized + IntHelp + Copy + Clone + Hash + Debug + Eq + Send
 macro_rules! impl_kmer_storage {
     ($type:ty) => {
         impl KmerStorage for $type {
+            fn capacity() -> usize {
+                4 * std::mem::size_of::<Self>()
+            }
             fn new() -> Self {
                 0 as Self
             }
             fn extend_right(&mut self, k: usize, base: u8) {
                 let bits = base as Self;
                 *self = (*self << 2) | bits;
-                // If we've exceeded the k-mer size, mask off the extra bits
                 if k < 4 * std::mem::size_of::<Self>() {
-                    let mask = (1 << 2 * k) - 1;
-                    *self &= mask as Self;
+                    let mask: Self = (1 << (2 * k)) - 1;
+                    *self &= mask;
                 }
             }
             fn extend_left(&mut self, k: usize, base: u8) {
@@ -176,6 +182,20 @@ macro_rules! impl_kmer_storage {
                     rc = rc >> offset;
                 }
                 rc
+            }
+            fn print(&self, k: usize) -> String {
+                let mut bits = *self;
+                let mut pairs = Vec::new();
+                while bits > 0 {
+                    pairs.push((bits & 0b11) as u8);
+                    bits >>= 2;
+                }
+                while pairs.len() < k {
+                    pairs.push(0);
+                }
+                pairs.reverse();
+                let ascii = pairs.iter().map(|&x| unpack_base(x)).collect::<Vec<u8>>();
+                unsafe { String::from_utf8_unchecked(ascii.clone()) }
             }
         }
     };
@@ -192,27 +212,27 @@ mod tests {
     use super::*;
     use packed_seq::complement_base;
     #[test]
-    fn test_extend_right() {
-        let k = 3; // k-mer size
+    fn extend_right() {
+        let k = 3;
         let mut kmer: u8 = KmerStorage::new();
         kmer.extend_right(k, 3);
         kmer.extend_right(k, 1);
         kmer.extend_right(k, 2);
         kmer.extend_right(k, 3);
-        assert_eq!(kmer, 0b00011011); // ACTG in 2-bit encoding
+        assert_eq!(kmer, 0b00011011);
     }
     #[test]
-    fn test_extend_left() {
+    fn extend_left() {
         let k = 3; // k-mer size
         let mut kmer: u8 = KmerStorage::new();
         kmer.extend_left(k, 3);
         kmer.extend_left(k, 1);
         kmer.extend_left(k, 2);
         kmer.extend_left(k, 3);
-        assert_eq!(kmer, 0b00111001); // ACTG in 2-bit encoding
+        assert_eq!(kmer, 0b00111001);
     }
     #[test]
-    fn test_reverse_complement() {
+    fn reverse_complement() {
         let k = 3; // k-mer size
         let mut kmer: u8 = KmerStorage::new();
         kmer.extend_right(k, 1);
@@ -222,6 +242,6 @@ mod tests {
         kmer_rc.extend_left(k, complement_base(1));
         kmer_rc.extend_left(k, complement_base(2));
         kmer_rc.extend_left(k, complement_base(3));
-        assert_eq!(kmer.rc(k), kmer_rc); // ACT in 2-bit encoding
+        assert_eq!(kmer.rc(k), kmer_rc);
     }
 }

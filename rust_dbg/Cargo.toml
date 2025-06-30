@@ -5,8 +5,8 @@ edition = "2021"
 
 [dependencies]
 needletail = "0.6"
-# packed-seq = "3"
-packed-seq = { git = "https://github.com/flopau76/packed-seq", features = ["epserde"]}
+packed-seq = { version = "3", features = ["epserde"] }
+# packed-seq = { git = "https://github.com/flopau76/packed-seq", features = ["epserde"] }
 boomphf = { version = "0.6" }
 smallvec = "1"
 epserde = "0.8"

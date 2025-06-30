@@ -1,6 +1,8 @@
 //! To create graphs from fasta/unitig files
 
+use clap::builder::Str;
 use smallvec::SmallVec;
+use std::fmt::Debug;
 use std::ops::Range;
 
 use std::{collections::HashSet, error::Error, path::Path};
@@ -42,7 +44,7 @@ impl std::fmt::Display for PathwayError {
 //                              SequenceSet                                         //
 //####################################################################################
 
-/// A 2-bit packed owned set of multiple DNA sequences.
+/// 2-bit packed owned set of multiple DNA sequences.
 #[derive(Epserde, Debug, Default)]
 pub struct SequenceSet {
     sequences: PackedSeqVec,
@@ -85,7 +87,7 @@ impl SequenceSet {
 //####################################################################################
 
 /// Oriented node in a canonical de Bruijn graph
-#[derive(Epserde, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Epserde, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(C)]
 #[zero_copy]
 pub struct Node {
@@ -96,6 +98,16 @@ pub struct Node {
 impl Node {
     pub fn new(id: usize, is_rc: bool) -> Self {
         Self { id, is_rc }
+    }
+}
+
+impl Debug for Node {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.is_rc {
+            write!(f, "Node(-{})", self.id)
+        } else {
+            write!(f, "Node(+{})", self.id)
+        }
     }
 }
 
@@ -150,8 +162,8 @@ impl Side {
 //                                  BaseGraph                                       //
 //####################################################################################
 
-/// A base graph, containing only unitigs. No edges nor hash-functions.
-/// This is only an itermediate step used to build the final graph.
+/// Base graph, containing only unitigs, without indexing.
+/// This is only an itermediate step to build the final graph.
 #[derive(Epserde, Debug)]
 pub struct BaseGraph {
     pub k: usize,
@@ -187,19 +199,9 @@ impl BaseGraph {
 
     /// Get the kmer at the given `side` of a `node`.
     pub fn node_kmer<KS: KmerStorage>(&self, node: Node, side: Side) -> KS {
-        match node.is_rc {
-            true => {
-                let seq_vec = self.sequences.get(node.id).to_revcomp();
-                let seq = seq_vec.as_slice();
-                let pos = side.choose(0, seq.len() - self.k());
-                KS::get_kmer(self.k(), seq, pos)
-            }
-            false => {
-                let seq = self.sequences.get(node.id);
-                let pos = side.choose(0, seq.len() - self.k());
-                KS::get_kmer(self.k(), seq, pos)
-            }
-        }
+        let seq = self.node_seq(node);
+        let pos = side.choose(0, seq.len() - self.k());
+        KS::get_kmer(self.k(), seq.as_slice(), pos)
     }
 
     /// Create a graph from a fasta file containing unitigs (as returned by ggcat for example).
@@ -221,8 +223,8 @@ impl BaseGraph {
     }
 
     /// Create a (non-compacted) graph from a packed sequence. (For debugging mainly)
-    #[deprecated = "warning: the thus obtained graph will not be compacted"]
-    pub fn from_seq<'a>(seq: PackedSeqVec, k: usize, stranded: bool) -> Self {
+    #[deprecated = "warning: the obtained graph will not be compacted"]
+    pub fn from_seq<'a>(seq: &PackedSeqVec, k: usize, stranded: bool) -> Self {
         if k > 32 {
             panic!("Unsuported kmer size: {}. Maximum is 32.", k);
         }
@@ -235,13 +237,12 @@ impl BaseGraph {
             if !stranded {
                 let rc_kmer = kmer.to_revcomp();
                 let rc_kmer_u64 = rc_kmer.as_slice().as_u64();
-                kmer_u64 = kmer_u64.min(rc_kmer_u64);
+                kmer_u64 = kmer_u64.min(rc_kmer_u64); // TODO: this is not really the canonical kmers, as ordering is ACTG
             }
             if kmer_set.insert(kmer_u64) {
                 sequences.push_seq(kmer);
             }
         }
-        println!("{:?}", kmer_set);
 
         // create the graph
         Self {
@@ -254,10 +255,18 @@ impl BaseGraph {
     /// Create a (non-compacted) graph from an ascii sequence. (For debugging mainly)
     pub fn from_seq_ascii<'a>(seq: &[u8], k: usize, stranded: bool) -> Self {
         let seq = PackedSeqVec::from_ascii(seq);
-        Self::from_seq(seq, k, stranded)
+        Self::from_seq(&seq, k, stranded)
     }
 
     pub fn finish<KS: KmerStorage>(self) -> Graph<KS> {
+        assert!(
+            KS::capacity() >= self.k(),
+            "KmerStorage {} cant hold k = {} nucleotides. Maximum is {}.",
+            std::any::type_name::<KS>(),
+            self.k(),
+            KS::capacity()
+        );
+
         // compute the edges
         // TODO
 
@@ -266,13 +275,33 @@ impl BaseGraph {
         let mut right_kmers = Vec::with_capacity(self.len());
         for i in 0..self.len() {
             let node = Node::new(i, false);
-            let left_kmer = self.node_kmer(node, Side::Left);
-            let right_kmer = self.node_kmer(node, Side::Right);
+            let left_kmer: KS = self.node_kmer(node, Side::Left);
+            let right_kmer: KS = self.node_kmer(node, Side::Right);
             left_kmers.push(left_kmer);
             right_kmers.push(right_kmer);
         }
         let left_ids: Vec<usize> = (0..self.len()).collect();
         let right_ids: Vec<usize> = (0..self.len()).collect();
+
+        // check that the kmers are unique
+        let mut left_kmers_set = HashSet::new();
+        let mut right_kmers_set = HashSet::new();
+        for kmer in &left_kmers {
+            if !left_kmers_set.insert(kmer.clone()) {
+                panic!(
+                    "Left kmer {} is not unique in the graph.",
+                    kmer.print(self.k())
+                );
+            }
+        }
+        for kmer in &right_kmers {
+            if !right_kmers_set.insert(kmer.clone()) {
+                panic!(
+                    "Right kmer {} is not unique in the graph.",
+                    kmer.print(self.k())
+                );
+            }
+        }
 
         // create the mphf for left and right kmers
         let left_kmers_mphf = NoKeyBoomHashMap::new(left_kmers, left_ids);
@@ -286,13 +315,24 @@ impl BaseGraph {
             right_kmers: right_kmers_mphf,
         }
     }
+
+    /// Print the base graph
+    pub fn print(&self) {
+        println!("BaseGraph: k = {}, stranded = {}", self.k, self.stranded);
+        for i in 0..self.len() {
+            let node = Node::new(i, false);
+            let seq = self.node_seq(node);
+            let seq_str = unsafe { String::from_utf8_unchecked(seq.as_slice().unpack()) };
+            println!("Node {}: {}", i, seq_str); // TODO: add edges
+        }
+    }
 }
 
 //####################################################################################
 //                                  Graph                                           //
 //####################################################################################
 
-/// A de Bruijn graph, containing unitigs and edges.
+/// De Bruijn graph, containing unitigs and edges.
 #[derive(Epserde, Debug)]
 pub struct Graph<KS: KmerStorage> {
     base: BaseGraph,
@@ -322,6 +362,11 @@ impl<KS: KmerStorage> Graph<KS> {
     #[inline]
     pub fn node_kmer(&self, node: Node, side: Side) -> KS {
         self.base.node_kmer(node, side)
+    }
+    /// Print the graph.
+    #[inline]
+    pub fn print(&self) {
+        self.base.print();
     }
 
     /// Get the neighbors of a `node` on a given `side`.
@@ -368,7 +413,7 @@ impl<KS: KmerStorage> Graph<KS> {
             let map = side.choose(&self.right_kmers, &self.left_kmers);
             if let Some(id) = map.get(&rc_kmer) {
                 let node = Node::new(*id, true);
-                if self.node_kmer(node, side) == rc_kmer {
+                if self.node_kmer(node, side) == kmer {
                     return Some(node);
                 }
             }
@@ -388,15 +433,50 @@ impl<KS: KmerStorage> Graph<KS> {
     }
 }
 
-// // Dump and load from binary
-// impl<KS: KmerStorage + Serialize + Deserialize> Graph<KS> {
-//     /// Write the graph to a binary file.
-//     pub fn save_to_binary(&self, path: &Path) -> Result<(), Box<dyn Error>> {
-//         let mut file = std::fs::File::create(path)?;
-//         self.serialize(&mut file, self)?;
-//         Ok(())
-//     }
-// }
+/// Graph construction
+impl<KS: KmerStorage> Graph<KS> {
+    /// Create a graph from a fasta file containing unitigs (as returned by ggcat for example).
+    pub fn from_unitig_file(path: &Path, k: usize, stranded: bool) -> Self {
+        let base = BaseGraph::from_unitig_file(path, k, stranded);
+        println!(
+            "Creating graph from unitig file: {} with k = {}, stranded = {}",
+            path.display(),
+            k,
+            stranded
+        );
+        println!("Kmer storage type: {}", std::any::type_name::<KS>());
+        base.finish()
+    }
+
+    /// Create a (non-compacted) graph from a packed sequence. (For debugging mainly)
+    #[deprecated = "warning: the obtained graph will not be compacted"]
+    pub fn from_seq<'a>(seq: &PackedSeqVec, k: usize, stranded: bool) -> Self {
+        let base = BaseGraph::from_seq(seq, k, stranded);
+        base.finish()
+    }
+
+    /// Create a (non-compacted) graph from an ascii sequence. (For debugging mainly)
+    #[deprecated = "warning: the obtained graph will not be compacted"]
+    pub fn from_seq_ascii<'a>(seq: &[u8], k: usize, stranded: bool) -> Self {
+        let base = BaseGraph::from_seq_ascii(seq, k, stranded);
+        base.finish()
+    }
+}
+
+// Dump and load from binary
+impl<KS: KmerStorage + Serialize + Deserialize> Graph<KS> {
+    /// Write the graph to a binary file.
+    pub fn save_to_binary(&self, path: &Path) -> Result<(), Box<dyn Error>> {
+        self.base.store(path)?;
+        Ok(())
+    }
+    /// Load the graph from a binary file.
+    pub fn load_from_binary(path: &Path) -> Result<Self, Box<dyn Error>> {
+        let b = std::fs::read(&path)?;
+        let base = BaseGraph::deserialize_eps(&b)?;
+        Ok(base.finish())
+    }
+}
 
 #[cfg(test)]
 mod test_packed_seq {
@@ -439,8 +519,8 @@ mod test_packed_seq {
 mod unit_test {
     use super::*;
 
-    const STRANDED: bool = false;
-    const SEQ: &[u8; 16] = b"gggccccgggaaaaac";
+    const STRANDED: bool = true;
+    const SEQ: &[u8; 16] = b"GGGCCCCGGGAAAAAC";
 
     const K: usize = 3;
     type KS = u8;
@@ -465,89 +545,45 @@ mod unit_test {
     #[ignore]
     #[test]
     fn node_iterator_offset() {
-        let seq = b"aaccggtt";
-        let base = BaseGraph::from_seq_ascii(seq, 4, true);
+        let seq = b"aaattt";
+        let base = BaseGraph::from_seq_ascii(seq, 3, true);
         let graph: Graph<KS> = base.finish();
-        println!("Graph: {:?}", graph);
 
-        let seq_start = PackedSeqVec::from_ascii(b"aacc");
+        let seq_start = PackedSeqVec::from_ascii(b"aaa");
         let mut unitig_iter = NodeIterator::new(&graph, seq_start).unwrap();
-        while let Some(node) = unitig_iter.next().unwrap() {
-            println!("Node: {:?}", node);
+        while let Some(_) = unitig_iter.next().unwrap() {
+            // println!("Node: {:?}", node);
         }
         assert_eq!(unitig_iter.start_offset, Some(0));
         assert_eq!(unitig_iter.end_offset, Some(0));
-
-        let seq_end = PackedSeqVec::from_ascii(b"ggtt");
-        let mut unitig_iter = NodeIterator::new(&graph, seq_end).unwrap();
-        while let Some(node) = unitig_iter.next().unwrap() {
-            println!("Node: {:?}", node);
-        }
-        assert_eq!(unitig_iter.start_offset, Some(0));
-        assert_eq!(unitig_iter.end_offset, Some(0));
-
-        // // unimplemented: if unitig does not correspond to the extremity of a node, it is not detected
-        // let seq_middle = PackedSeqVec::from_ascii(b"ccgg");
-        // let mut unitig_iter = NodeIterator::new(&graph, seq_middle).unwrap();
-        // while let Some(node) = unitig_iter.next().unwrap() {
-        //     println!("Node: {:?}", node);
-        // }
-        // assert_eq!(unitig_iter.start_offset, Some(2));
-        // assert_eq!(unitig_iter.end_offset, Some(2));
     }
 
-    // #[test]
-    // fn test_node_iterator() {
-    //     // seq -> node_list -> seq
-    //     let graph = Graph::<Kmer3>::from_seq_serial(&SEQ, STRANDED);
-    //     let mut unitig_iter = NodeIterator::new(&graph, &SEQ).unwrap();
+    #[test]
+    fn node_iterator() {
+        // seq -> node_list -> seq
+        let base = BaseGraph::from_seq_ascii(SEQ, K, STRANDED);
+        let graph: Graph<KS> = base.finish();
 
-    //     let mut path = Vec::new();
-    //     while let Some(node) = unitig_iter.next().unwrap() {
-    //         path.push(node);
-    //     }
-    //     println!("{:?}", path);
-    //     let path_seq = graph.sequence_of_path(path.iter());
-    //     let seq = DnaString::from_bytes(SEQ.0);
-    //     assert!(path_seq == seq);
-    // }
+        let seq = PackedSeqVec::from_ascii(SEQ);
+        let path: Vec<Node> = NodeIterator::new(&graph, seq.clone()).unwrap().collect();
+        let seq_out = graph.path_seq(&path);
 
-    // #[ignore]
-    // #[test]
-    // fn print_encode_seq() {
-    //     // seq -> (node_list) -> path
-    //     let seq = DnaString::from_bytes(SEQ.0);
-    //     let graph = Graph::<Kmer3>::from_seq_serial(&SEQ, STRANDED);
-    //     let path = ContinuousPath::encode_seq(&graph, &seq);
-    //     println!("Start node: {:?}", path.start_node);
-    //     for ext in path.extensions.iter() {
-    //         println!("{}", ext);
-    //     }
-    // }
+        assert_eq!(SEQ, seq_out.as_slice());
+    }
 
-    // #[test]
-    // fn test_code_seq() {
-    //     // seq -> (node_list) -> path -> (node_list) -> seq
-    //     let seq = DnaString::from_bytes(SEQ.0);
-    //     let graph = Graph::<Kmer3>::from_seq_serial(&SEQ, STRANDED);
+    #[ignore]
+    #[test]
+    fn node_neigh() {
+        let seq = b"cccagggt";
+        let base = BaseGraph::from_seq_ascii(seq, 3, false);
+        let graph: Graph<KS> = base.finish();
+        graph.print();
 
-    //     let decoded_seq = ContinuousPath::encode_seq(&graph, &seq).decode_seq(&graph);
-    //     assert_eq!(seq, decoded_seq);
-    // }
+        let node = Node::new(0, false);
+        let neigh_left = graph.node_neigh(node, Side::Left);
+        let neigh_right = graph.node_neigh(node, Side::Right);
 
-    // #[ignore]
-    // #[test]
-    // fn print_get_repetitions() {
-    //     let test = vec![(0, Dir::Left); 5]
-    //         .into_iter()
-    //         .chain(vec![(5, Dir::Left); 5])
-    //         .chain(vec![(0, Dir::Left); 5])
-    //         .chain(vec![(5, Dir::Left); 5])
-    //         .collect::<Vec<_>>();
-    //     let rep = get_repetitions(&test);
-    //     println!("Repetitions:");
-    //     for (start, nb_repeats, offset) in rep.iter() {
-    //         println!("{} {} {}", start, nb_repeats, offset);
-    //     }
-    // }
+        println!("Right neighbors: {:?}", neigh_right);
+        println!("Left neighbors: {:?}", neigh_left);
+    }
 }
