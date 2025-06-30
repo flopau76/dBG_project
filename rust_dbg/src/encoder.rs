@@ -49,8 +49,7 @@ impl NodesEncoding {
 
     pub fn sequence(&self, graph: &Graph<impl KmerStorage>) -> String {
         let nodes = self.decode(graph);
-        let seq = graph.path_seq(&nodes);
-        unsafe { String::from_utf8_unchecked(seq.as_slice().unpack()) }
+        unsafe { String::from_utf8_unchecked(graph.path_seq(&nodes)) }
     }
 }
 
@@ -66,7 +65,7 @@ impl Contig {
     /// Returns the sequence of the contig
     pub fn sequence(&self, graph: &Graph<impl KmerStorage>) -> String {
         let seq = self.nodes_encoding.sequence(graph);
-        seq[self.start_offset..seq.len() - self.end_offset].to_string()
+        seq[self.start_offset..seq.len() - self.end_offset].to_string() // TODO: more efficient way of slicing ?
     }
 }
 

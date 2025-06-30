@@ -15,7 +15,7 @@ pub struct NodeIterator<'a, KS: KmerStorage> {
     graph: &'a Graph<KS>,
     seq: PackedSeqVec,
     next_pos: usize,
-    next_node: Option<Node>,
+    current_node: Option<Node>,
     pub start_offset: Option<usize>,
     pub end_offset: Option<usize>,
 }
@@ -26,7 +26,7 @@ impl<'a, KS: KmerStorage> NodeIterator<'a, KS> {
             graph,
             seq,
             next_pos: 0,
-            next_node: None,
+            current_node: None,
             start_offset: None,
             end_offset: None,
         };
@@ -39,14 +39,14 @@ impl<'a, KS: KmerStorage> NodeIterator<'a, KS> {
         self.next_pos
     }
 
-    /// get the next node in the iterator, without advancing
+    /// get the current node in the iterator, without advancing
     pub fn peek(&self) -> Option<Node> {
-        self.next_node
+        self.current_node
     }
 
-    /// get the next node in the iterator, before advancing the iterator
+    /// get the current node in the iterator, before advancing the iterator
     pub fn next(&mut self) -> Result<Option<Node>, PathwayError> {
-        let next = self.next_node;
+        let next = self.current_node;
         self.advance()?;
         Ok(next)
     }
@@ -54,8 +54,9 @@ impl<'a, KS: KmerStorage> NodeIterator<'a, KS> {
     /// advance the iterator
     fn advance(&mut self) -> Result<(), PathwayError> {
         // check if we reached the end of the sequence
-        if self.next_pos + self.graph.k() >= self.seq.len() {
-            self.next_node = None;
+        if self.next_pos + self.graph.k() > self.seq.len() {
+            self.current_node = None;
+            self.end_offset = Some(self.next_pos - 1 + self.graph.k() - self.seq.len());
             return Ok(());
         }
 
@@ -63,13 +64,19 @@ impl<'a, KS: KmerStorage> NodeIterator<'a, KS> {
         let mut kmer = KS::get_kmer(self.graph.k(), self.seq.as_slice(), self.next_pos);
         let node = self.graph.search_kmer(kmer, Side::Left);
 
+        println!(
+            "next_pos: {}, kmer: {:?}, node: {:?}",
+            self.next_pos, kmer, node
+        );
+
         // kmer corresponds to the start of a node
         if node.is_some() {
-            self.next_node = node;
+            self.current_node = node;
             let node = node.unwrap();
             let node_seq = self.graph.node_seq(node);
 
             // check that the rest of the node sequence matches the input sequence
+            // TODO: if the node_seq is lenger than the unitig, it should raise an error
             let nb_bases = min(node_seq.len(), self.seq.len() - self.next_pos);
             let expected_seq = node_seq.slice(Range {
                 start: self.graph.k(),
@@ -89,8 +96,8 @@ impl<'a, KS: KmerStorage> NodeIterator<'a, KS> {
         }
         // first kmer does not correspond to the start of a node
         else {
-            if self.start_offset.is_none() {
-                return Err(PathwayError::KmerNotFound(String::from("TODO")));
+            if self.start_offset.is_some() {
+                return Err(PathwayError::KmerNotFound(format!("{:?}", kmer)));
             }
             // the node_iterator has not been initialized yet. We might have an offset in the first node
             // advance in the sequence until we find the last kmer of a node
@@ -107,7 +114,7 @@ impl<'a, KS: KmerStorage> NodeIterator<'a, KS> {
                 node = self.graph.search_kmer(kmer, Side::Right);
             }
             // we found the end of a node
-            self.next_node = node;
+            self.current_node = node;
             let node = node.unwrap();
             let node_seq = self.graph.node_seq(node);
             self.start_offset = Some(node_seq.len() - self.next_pos - self.graph.k());
