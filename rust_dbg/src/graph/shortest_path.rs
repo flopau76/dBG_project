@@ -3,27 +3,22 @@
 use crate::{Graph, KmerStorage, Node, PathwayError, Side};
 
 use std::collections::{hash_map::Entry, HashMap, HashSet};
-use std::vec;
 
-// Advances the bfs by one depth and returns the new frontier set. `dir` indicates in which direction to advance
-// The hasmap `visited` may contain additional information about the nodes, such as their parents or distances, provided the correct closure `f` is given.
-fn advance_bfs<D, F>(
+// Advances the bfs by one depth and updates `parents` with the first encountered parent.
+// `dir` indicates in which direction to advance.
+// Returns the new frontier set.
+fn advance_bfs_parents(
     graph: &Graph<impl KmerStorage>,
     dir: Side,
     queue: &mut Vec<Node>,
-    visited: &mut HashMap<Node, D>,
-    f: F,
-) -> Vec<Node>
-where
-    F: Fn(Node) -> D,
-{
+    parents: &mut HashMap<Node, Node>,
+) -> Vec<Node> {
     let mut next_queue = Vec::new();
     while let Some(current_node) = queue.pop() {
         for neigh_node in graph.node_neigh(current_node, dir) {
-            let entry = visited.entry(neigh_node);
+            let entry = parents.entry(neigh_node);
             if let Entry::Vacant(e) = entry {
-                let neigh_d = f(current_node);
-                e.insert(neigh_d);
+                e.insert(current_node);
                 next_queue.push(neigh_node);
             }
         }
@@ -31,27 +26,40 @@ where
     next_queue
 }
 
-// marks the nodes as visited
-fn advance_bfs_simple(
+// Advances the bfs from the given `side` and updates `parents` with all encountered parents.
+// Queue is modififed in place.
+fn advance_bfs_parents_all(
     graph: &Graph<impl KmerStorage>,
-    dir: Side,
+    side: Side,
     queue: &mut Vec<Node>,
-    visited: &mut HashMap<Node, ()>,
-) -> Vec<Node> {
-    advance_bfs(graph, dir, queue, visited, |_| ())
+    parents: &mut HashMap<Node, Vec<Node>>,
+) -> () {
+    let mut next_parents = HashMap::new();
+    while let Some(current_node) = queue.pop() {
+        for neigh_node in graph.node_neigh(current_node, side.opposite()) {
+            if !parents.contains_key(&neigh_node) {
+                let entry = next_parents.entry(neigh_node);
+                match entry {
+                    Entry::Vacant(e) => {
+                        e.insert(vec![current_node]);
+                    }
+                    Entry::Occupied(mut e) => {
+                        e.get_mut().push(current_node);
+                    }
+                }
+            }
+        }
+    }
+    let mut next_queue = Vec::new();
+    for (node, parent_nodes) in next_parents {
+        parents.insert(node, parent_nodes);
+        next_queue.push(node);
+    }
+    *queue = next_queue;
+    ()
 }
 
-// marks the nodes as visited and stores their parents
-fn advance_bfs_parents(
-    graph: &Graph<impl KmerStorage>,
-    dir: Side,
-    queue: &mut Vec<Node>,
-    parents: &mut HashMap<Node, Node>,
-) -> Vec<Node> {
-    advance_bfs(graph, dir, queue, parents, |current_node| (current_node))
-}
-
-/// Get the shortest path between two nodes, using a double-ended BFS.
+/// Get (one of) the shortest path between two nodes, using a double-ended BFS.
 /// Returns ]start_node ... end_node]
 pub fn get_shortest_path<K: KmerStorage>(
     graph: &Graph<K>,
@@ -131,27 +139,59 @@ pub fn get_shortest_path<K: KmerStorage>(
     Ok(path)
 }
 
-// Retuns the position-1 of the last ancestor of `node` on path[start_pos, end_pos].
-fn get_ancestor_on_path(
-    parents: &HashMap<Node, Node>,
+// Find the id of the first ancestor of `node` belonging to `path``, given the map `parents_right`
+// If `included` is true, the node itself is considered as an ancestor.
+fn first_ancestor_on_path(
+    node: Node,
+    parents: &HashMap<Node, Vec<Node>>,
     path: &[Node],
-    node: &Node,
-    start_pos: usize,
-    end_pos: usize,
+    included: bool,
 ) -> usize {
-    let mut parent = node;
-    let mut pos = path[start_pos + 1..=end_pos]
-        .iter()
-        .position(|&x| x == *parent);
-    while pos.is_none() {
-        parent = parents
-            .get(&parent)
-            .expect("Parent not found in parents map");
-        pos = path[start_pos + 1..=end_pos]
-            .iter()
-            .position(|&x| x == *parent);
+    // if node is included and on the path, return its index
+    if included {
+        if let Some(idx) = path.iter().position(|&n| n == node) {
+            return idx;
+        }
     }
-    pos.unwrap() + start_pos
+    // otherwise, recursive call to find the ancestor of its parents
+    parents
+        .get(&node)
+        .expect(format!("Node {node:?} should have parents").as_str())
+        .iter()
+        .map(|&n| first_ancestor_on_path(n, parents, path, true))
+        .min()
+        .expect("Node should be visited from the right")
+}
+
+// Look if the `queue` at the given side has met the bfs from the opposite side, or the yet unexplored center of the path (between `pos_left` and `pos_right`).
+// If so, return the new end position, corresponding to the last ancestor on the right side of the path.
+fn shortcut_from_side(
+    queue: &Vec<Node>,
+    parents_left: &HashMap<Node, Vec<Node>>,
+    parents_right: &HashMap<Node, Vec<Node>>,
+    path: &Vec<Node>,
+    pos_left: usize,
+    pos_right: usize,
+    end_pos: usize,
+    side: Side,
+) -> usize {
+    let mut new_end_pos = end_pos;
+    let opposite_parents = side.choose(parents_right, parents_left);
+    for node in queue.iter() {
+        if opposite_parents.contains_key(node) || path[pos_left + 1..pos_right].contains(node) {
+            new_end_pos = std::cmp::min(
+                end_pos,
+                first_ancestor_on_path(
+                    *node,
+                    parents_right,
+                    &path[pos_left..=end_pos],
+                    side == Side::Left,
+                ) + pos_left
+                    - 1,
+            );
+        }
+    }
+    new_end_pos
 }
 
 /// Perform a (double-ended) BFS to find the next target_node to elongate `path` from `start_pos`.  
@@ -184,76 +224,48 @@ pub fn get_next_target_node<K: KmerStorage>(
         seen.insert(node);
     }
 
-    // init left side of BFS
-    let mut visited_left = HashMap::new();
+    // init BFS
+    let mut parents_left: HashMap<Node, Vec<Node>> = HashMap::new();
     let mut queue_left = vec![path[start_pos]];
     let mut pos_left = start_pos;
+
+    let mut parents_right: HashMap<Node, Vec<Node>> = HashMap::new();
+    let mut queue_right = Vec::new();
 
     loop {
         // update right extremity and (re)start BFS
         let end_pos = new_end_pos;
-        let mut parents_right = HashMap::new();
-        let mut queue_right = vec![path[end_pos]];
+        parents_right.clear();
+        queue_right.clear();
+        queue_right.push(path[end_pos]);
         let mut pos_right = end_pos;
 
+        // advance BFS
         while pos_left + 1 < pos_right && new_end_pos == end_pos {
-            // advance BFS
-            if queue_left.len() <= queue_right.len() {
-                // elongate from the left
+            // choose the smaller side to elongate
+            let side = if queue_left.len() < queue_right.len() {
                 pos_left += 1;
-                queue_left =
-                    advance_bfs_simple(graph, Side::Right, &mut queue_left, &mut visited_left);
-                // check if we found a shortcut
-                // ... to the right side of the path
-                for (i, node) in path[pos_left + 1..=end_pos].iter().enumerate() {
-                    if visited_left.contains_key(node) {
-                        new_end_pos = pos_left + i;
-                        break;
-                    }
-                }
-                // ... to the BFS from the right
-                for node in &queue_left {
-                    if parents_right.contains_key(node) {
-                        // find the last ancestor on the path
-                        let pos =
-                            get_ancestor_on_path(&parents_right, path, node, start_pos, end_pos);
-                        new_end_pos = std::cmp::min(new_end_pos, pos);
-                    }
-                }
+                Side::Left
             } else {
-                // elongate from the right
                 pos_right -= 1;
-                queue_right =
-                    advance_bfs_parents(graph, Side::Left, &mut queue_right, &mut parents_right);
-                // check if we found a shortcut
-                // ... to the BFS from the left
-                for node in queue_right.iter() {
-                    if visited_left.contains_key(node) {
-                        // find the last ancestor on the path
-                        let pos = get_ancestor_on_path(
-                            &parents_right,
-                            path,
-                            &parents_right[node],
-                            start_pos,
-                            end_pos,
-                        );
-                        new_end_pos = std::cmp::min(new_end_pos, pos);
-                    }
-                }
-                // ... to the left side of the path
-                for left_node in path[start_pos..pos_right].iter() {
-                    if let Some(right_node) = parents_right.get(left_node) {
-                        let pos = get_ancestor_on_path(
-                            &parents_right,
-                            path,
-                            right_node,
-                            start_pos,
-                            end_pos,
-                        );
-                        new_end_pos = std::cmp::min(new_end_pos, pos);
-                    }
-                }
-            }
+                Side::Right
+            };
+            let queue = side.choose(&mut queue_left, &mut queue_right);
+            let parents = side.choose(&mut parents_left, &mut parents_right);
+            // advance the BFS from the given side
+            advance_bfs_parents_all(graph, side, queue, parents);
+            // TODO: check for multiple paths of the same length
+            // check for shortcuts
+            new_end_pos = new_end_pos.min(shortcut_from_side(
+                queue,
+                &parents_left,
+                &parents_right,
+                path,
+                pos_left,
+                pos_right,
+                end_pos,
+                side,
+            ));
         }
         // if we found a shortcut, we have to restart the BFS with a new target position
         if new_end_pos < end_pos {

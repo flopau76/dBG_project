@@ -215,6 +215,7 @@ impl<'a, K: KmerStorage> Encoder<'a, K> {
         let mut extensions = vec![Extension::TargetNode(
             *nodes.first().expect("The node vector is empty"),
         )];
+        println!("{:?}", extensions[0]);
 
         let mut current_position = 0;
         let mut repetitions = self.get_repetitions(&nodes);
