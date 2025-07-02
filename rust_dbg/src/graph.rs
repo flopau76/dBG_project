@@ -1,13 +1,13 @@
 //! To create graphs from fasta/unitig files
 
-use clap::builder::Str;
 use smallvec::SmallVec;
 use std::fmt::Debug;
 use std::ops::Range;
-
 use std::{collections::HashSet, error::Error, path::Path};
 
+use bincode::{Decode, Encode};
 use boomphf::hashmap::NoKeyBoomHashMap;
+use epserde::prelude::*;
 use needletail::parse_fastx_file;
 use packed_seq::{PackedSeq, PackedSeqVec, Seq, SeqVec};
 
@@ -15,10 +15,7 @@ use crate::KmerStorage;
 
 mod node_iterator;
 pub use node_iterator::NodeIterator;
-
 pub mod shortest_path;
-
-use epserde::prelude::*;
 
 //####################################################################################
 //                              Custom errors                                       //
@@ -87,9 +84,7 @@ impl SequenceSet {
 //####################################################################################
 
 /// Oriented node in a canonical de Bruijn graph
-#[derive(Epserde, Clone, Copy, PartialEq, Eq, Hash)]
-#[repr(C)]
-#[zero_copy]
+#[derive(Encode, Decode, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Node {
     pub id: usize,
     pub is_rc: bool,
@@ -133,9 +128,11 @@ impl<'a> NodeSeq<'a> {
     }
 }
 
-#[derive(Epserde, Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(C)]
-#[zero_copy]
+//####################################################################################
+//                                     Side                                         //
+//####################################################################################
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Side {
     Left,
     Right,
@@ -253,6 +250,7 @@ impl BaseGraph {
     }
 
     /// Create a (non-compacted) graph from an ascii sequence. (For debugging mainly)
+    #[deprecated = "warning: the obtained graph will not be compacted"]
     pub fn from_seq_ascii<'a>(seq: &[u8], k: usize, stranded: bool) -> Self {
         let seq = PackedSeqVec::from_ascii(seq);
         Self::from_seq(&seq, k, stranded)
@@ -316,7 +314,7 @@ impl BaseGraph {
         }
     }
 
-    /// Print the base graph
+    /// Print the base graph, with all its nodes and edges
     pub fn print(&self) {
         println!("BaseGraph: k = {}, stranded = {}", self.k, self.stranded);
         for i in 0..self.len() {
@@ -326,6 +324,16 @@ impl BaseGraph {
             println!("Node {}: {}", i, seq_str); // TODO: add edges
         }
     }
+
+    /// Print some summary stats
+    pub fn print_stats(&self) {
+        println!(
+            "BaseGraph: k = {}, stranded = {}, nodes = {}",
+            self.k,
+            self.stranded,
+            self.len(),
+        );
+    }
 }
 
 //####################################################################################
@@ -333,7 +341,7 @@ impl BaseGraph {
 //####################################################################################
 
 /// De Bruijn graph, containing unitigs and edges.
-#[derive(Epserde, Debug)]
+#[derive(Debug)]
 pub struct Graph<KS: KmerStorage> {
     base: BaseGraph,
     edges: Vec<usize>,
@@ -367,6 +375,12 @@ impl<KS: KmerStorage> Graph<KS> {
     #[inline]
     pub fn print(&self) {
         self.base.print();
+    }
+    /// Print some summary stats.
+    #[inline]
+    pub fn print_stats(&self) {
+        self.base.print_stats();
+        println!("Underlying kmer storage: {}", std::any::type_name::<KS>());
     }
 
     /// Get the neighbors of a `node` on a given `side`.
@@ -438,13 +452,6 @@ impl<KS: KmerStorage> Graph<KS> {
     /// Create a graph from a fasta file containing unitigs (as returned by ggcat for example).
     pub fn from_unitig_file(path: &Path, k: usize, stranded: bool) -> Self {
         let base = BaseGraph::from_unitig_file(path, k, stranded);
-        println!(
-            "Creating graph from unitig file: {} with k = {}, stranded = {}",
-            path.display(),
-            k,
-            stranded
-        );
-        println!("Kmer storage type: {}", std::any::type_name::<KS>());
         base.finish()
     }
 
@@ -475,6 +482,17 @@ impl<KS: KmerStorage + Serialize + Deserialize> Graph<KS> {
         let b = std::fs::read(&path)?;
         let base = BaseGraph::deserialize_eps(&b)?;
         Ok(base.finish())
+    }
+    /// Directly built a graph from a unitig file and store it to a binary file.
+    pub fn build_to_binary(
+        input: &Path,
+        output: &Path,
+        k: usize,
+        stranded: bool,
+    ) -> Result<(), Box<dyn Error>> {
+        let graph = BaseGraph::from_unitig_file(input, k, stranded);
+        graph.store(output)?;
+        Ok(())
     }
 }
 
@@ -573,7 +591,7 @@ mod unit_test {
 
     #[ignore]
     #[test]
-    fn node_neigh() {
+    fn print_node_neigh() {
         let seq = b"cccagggt";
         let base = BaseGraph::from_seq_ascii(seq, 3, false);
         let graph: Graph<KS> = base.finish();

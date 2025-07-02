@@ -139,18 +139,6 @@ pub trait KmerStorage: Sized + IntHelp + Copy + Clone + Hash + Debug + Eq + Send
         }
         kmer
     }
-    // note: It is probably faster to directly access the underlying storage of PackedSeq, but not publicly available.
-    // The closest option is to use the method as_u64, but it requires two conversions and won't work for k>32.
-    // fn get_kmer(k: usize, seq: PackedSeq, pos: usize) -> Self {
-    //     let kmer = seq
-    //         .slice(Range {
-    //             start: pos,
-    //             end: pos + k,
-    //         })
-    //         .as_u64();
-    //     Self::try_from(kmer).unwrap_or_else(|_| panic!("Failed to convert u64 to KmerStorage type"))
-    // }
-    /// Get the reverse complement of the k-mer.
     fn rc(self, k: usize) -> Self;
 }
 

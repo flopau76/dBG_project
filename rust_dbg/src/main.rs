@@ -1,13 +1,12 @@
 use epserde::prelude::*;
-use rust_dbg::encoder::{Encoder, EncoderParams};
+use rust_dbg::encoder::{Encoder, EncoderParams, Scaffold};
 use rust_dbg::{Graph, KmerStorage};
 
 use needletail::parse_fastx_file;
 
 use std::fs::File;
-use std::io::{BufReader, Write};
+use std::io::{BufReader, BufWriter};
 use std::path::PathBuf;
-use std::time::Instant;
 
 use clap::{Parser, Subcommand};
 
@@ -17,10 +16,6 @@ struct Cli {
     /// K-mer size
     #[arg(short)]
     k_size: usize,
-
-    /// Path to the binary graph file
-    #[arg(short, long)]
-    graph: PathBuf,
 
     #[command(subcommand)]
     command: Commands,
@@ -34,12 +29,20 @@ enum Commands {
         #[arg(short, long)]
         input: PathBuf,
 
+        /// Path to the resulting graph
+        #[arg(short, long)]
+        output: PathBuf,
+
         /// Treat reverse complementary kmers as different
         #[arg(short, long, default_value_t = false)]
         forward_only: bool,
     },
-    /// Get some stats about a graph
-    StatsG {},
+    /// Print some stats about a graph
+    StatsG {
+        /// Path to the encoded graph
+        #[arg(short, long)]
+        input: PathBuf,
+    },
     /// Encode a continuous sequence into a path in the graph
     Encode {
         /// Path to the sequence file (fasta format)
@@ -49,6 +52,10 @@ enum Commands {
         /// Path to the output file (custom text file)
         #[arg(short, long)]
         output: PathBuf,
+
+        /// Path to the encoded graph
+        #[arg(short, long)]
+        graph: PathBuf,
 
         /// Min repetition length to be used
         #[arg(long, default_value_t = 10)]
@@ -64,57 +71,62 @@ enum Commands {
     },
     /// Decode a path in the graph to retrieve the original sequence
     Decode {
-        /// Path to the file containing the encoded path
+        /// Path to the encoded paths
         #[arg(short, long)]
         input: PathBuf,
 
         /// Path to the output file (reconstructed sequence in fasta format)
         #[arg(short, long)]
         output: PathBuf,
+
+        /// Path to the encoded graph
+        #[arg(short, long)]
+        graph: PathBuf,
     },
-    /// Get some stats about the encoding of a path
+    /// Print some stats about the encoding of a path
     StatsP {
         /// Path to the file containing the encoded path
         #[arg(short, long)]
         input: PathBuf,
+
+        /// Path to the encoded graph
+        #[arg(short, long)]
+        graph: PathBuf,
     },
 }
 
 impl Commands {
-    fn run<KS: KmerStorage + Serialize + Deserialize>(&self, k: usize, path_graph: &PathBuf) {
+    fn run<KS: KmerStorage + Serialize + Deserialize>(&self, k: usize) {
         match self {
             Commands::Build {
                 input,
+                output,
                 forward_only,
             } => {
-                eprint!("Creating graph... ");
-                std::io::stderr().flush().unwrap();
-                let start = Instant::now();
-                let graph = Graph::<KS>::from_unitig_file(input, k, *forward_only);
-                let duration = start.elapsed();
-                eprintln!("done in {:?}", duration);
-
-                eprint!("Saving graph... ");
-                std::io::stderr().flush().unwrap();
-                let start = Instant::now();
-                graph.save_to_binary(path_graph).unwrap();
-                let duration = start.elapsed();
-                eprintln!("done in {:?}", duration);
+                println!(
+                    "Creating graph from unitig file: {} with k = {}, stranded = {}...",
+                    input.display(),
+                    k,
+                    forward_only,
+                );
+                Graph::<KS>::build_to_binary(input, output, k, *forward_only).unwrap();
+                println!("Graph saved to: {}", output.display());
             }
-            Commands::StatsG {} => {
-                let graph = Graph::<KS>::load_from_binary(&path_graph).unwrap();
-                // graph.print_stats();
+            Commands::StatsG { input } => {
+                let graph = Graph::<KS>::load_from_binary(&input).unwrap();
+                graph.print_stats();
             }
             Commands::Encode {
                 input,
                 output,
+                graph,
                 min_rep,
                 min_depth,
                 max_depth,
             } => {
-                let graph = Graph::<KS>::load_from_binary(path_graph).unwrap();
+                let graph = Graph::<KS>::load_from_binary(graph).unwrap();
                 let mut input_reader = parse_fastx_file(input).unwrap();
-                let mut output_writer = File::create(output).unwrap();
+                let mut output_writer = BufWriter::new(File::create(output).unwrap());
 
                 let encoder_params = EncoderParams {
                     min_nb_repeats: *min_rep as u16,
@@ -134,15 +146,30 @@ impl Commands {
                     eprintln!("Encoding record {}", id);
                     println!(">{}", id);
                     let scaffold = encoder.encode_record(id, &seq).unwrap();
-                    todo!();
+                    bincode::encode_into_std_write(
+                        scaffold,
+                        &mut output_writer,
+                        bincode::config::standard(),
+                    )
+                    .unwrap();
                 }
             }
-            Commands::Decode { input, output } => {
+            Commands::Decode {
+                input,
+                output,
+                graph,
+            } => {
                 todo!();
             }
-            Commands::StatsP { input } => {
+            Commands::StatsP { input, graph } => {
                 let mut input_reader = BufReader::new(File::open(input).unwrap());
-                todo!();
+                let graph = Graph::<KS>::load_from_binary(graph).unwrap();
+                while let Ok(scaffold) = bincode::decode_from_std_read::<Scaffold, _, _>(
+                    &mut input_reader,
+                    bincode::config::standard(),
+                ) {
+                    scaffold.print_stats(&graph);
+                }
             }
         }
     }
@@ -151,30 +178,29 @@ impl Commands {
 pub fn main() {
     let cli = Cli::parse();
     let k = cli.k_size;
-    let path_graph = cli.graph;
     let command = &cli.command;
 
     match k {
         1..=4 => {
             type KS = u8;
-            command.run::<KS>(k, &path_graph);
+            command.run::<KS>(k);
         }
         5..=8 => {
             type KS = u16;
-            command.run::<KS>(k, &path_graph);
+            command.run::<KS>(k);
         }
         9..=16 => {
             type KS = u32;
-            command.run::<KS>(k, &path_graph);
+            command.run::<KS>(k);
         }
         17..=32 => {
             type KS = u64;
-            command.run::<KS>(k, &path_graph);
+            command.run::<KS>(k);
         }
         33..=64 => {
             type KS = u128;
-            command.run::<KS>(k, &path_graph);
+            command.run::<KS>(k);
         }
-        _ => unimplemented!(),
+        _ => unimplemented!("K-mer size {} is not supported", k),
     }
 }

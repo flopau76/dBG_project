@@ -1,44 +1,57 @@
-use crate::graph::shortest_path;
-use crate::{Graph, KmerStorage, Node, NodeIterator, PathwayError, Side};
-
-use needletail::Sequence;
-use packed_seq::{PackedSeqVec, Seq, SeqVec};
 use std::collections::VecDeque;
 use std::fmt::Debug;
 
-#[derive(Copy, Clone)]
+use bincode::{Decode, Encode};
+use needletail::Sequence;
+use packed_seq::{PackedSeqVec, Seq, SeqVec};
+
+use crate::graph::shortest_path;
+use crate::{Graph, KmerStorage, Node, NodeIterator, PathwayError, Side};
+
+//####################################################################################
+//                        Extension  &  ExtensionVec                                //
+//####################################################################################
+
+#[derive(Encode, Decode, Copy, Clone)]
 /// An enum containing different ways to encode a path extension.
 pub enum Extension {
-    ShortestPath(Node),
+    TargetNode(Node),
     NextNucleotide(u8),
-    Repetition((u16, u8)), // nb_repeats, offset (-1)
+    Repetition { nb_repeats: u16, offset: u8 },
 }
 
 impl Debug for Extension {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Extension::ShortestPath(node) => write!(f, "SP({:?})", node),
+            Extension::TargetNode(node) => write!(f, "TN({:?})", node),
             Extension::NextNucleotide(base) => write!(f, "NN({})", base),
-            Extension::Repetition((nb_repeats, offset)) => {
+            Extension::Repetition { nb_repeats, offset } => {
                 write!(f, "R({}-{})", nb_repeats, offset)
             }
         }
     }
 }
 
-/// An encoded suite of nodes, described as a start node and a list of extensions
-#[derive(Debug, Clone)]
-pub struct NodesEncoding {
-    start_node: Node,
-    extensions: Vec<Extension>,
-}
+/// A vector of extensions, describing a path in a de Bruijn graph.
+#[derive(Encode, Decode, Debug, Clone)]
+pub struct ExtensionVec(Vec<Extension>);
 
-impl NodesEncoding {
+impl ExtensionVec {
+    /// Converts the vector of extensions into a suite of nodes in the graph.
     pub fn decode(&self, graph: &Graph<impl KmerStorage>) -> Vec<Node> {
-        let mut nodes = vec![self.start_node];
-        for extension in &self.extensions {
+        let mut nodes = Vec::new();
+
+        match self.0.first() {
+            Some(Extension::TargetNode(start_node)) => {
+                nodes.push(*start_node);
+            }
+            None => panic!("The extension vector is empty"),
+            _ => panic!("Invalid encoding: the first extension should be a TargetNode"),
+        }
+
+        for extension in &self.0[1..] {
             match extension {
-                Extension::ShortestPath(target_node) => {
+                Extension::TargetNode(target_node) => {
                     nodes.extend(
                         shortest_path::get_shortest_path(
                             graph,
@@ -48,7 +61,7 @@ impl NodesEncoding {
                         .unwrap(),
                     );
                 }
-                Extension::Repetition((nb_repeats, offset)) => {
+                Extension::Repetition { nb_repeats, offset } => {
                     for _ in 0..*nb_repeats {
                         let prev = nodes[nodes.len() - 1 - *offset as usize];
                         nodes.push(prev);
@@ -58,9 +71,16 @@ impl NodesEncoding {
                     let last_node = *nodes.last().unwrap();
                     let mut kmer = graph.node_kmer(last_node, Side::Right);
                     kmer.extend_right(graph.k(), *base);
-                    let next_node = graph
-                        .search_kmer(kmer, Side::Left)
-                        .expect("Next node should exist");
+                    let next_node = graph.search_kmer(kmer, Side::Left).expect(&format!(
+                        "Next expected seq {} after node {:?}:{} not found in graph",
+                        kmer.print(graph.k()),
+                        last_node,
+                        unsafe {
+                            String::from_utf8_unchecked(
+                                graph.node_seq(last_node).as_slice().unpack(),
+                            )
+                        }
+                    ));
                     nodes.push(next_node);
                 }
             }
@@ -68,16 +88,21 @@ impl NodesEncoding {
         nodes
     }
 
+    /// Returns the sequence of the path represented by the extensions.
     pub fn sequence(&self, graph: &Graph<impl KmerStorage>) -> String {
         let nodes = self.decode(graph);
         unsafe { String::from_utf8_unchecked(graph.path_seq(&nodes)) }
     }
 }
 
+//####################################################################################
+//                             Contig  &  Scaffold                                  //
+//####################################################################################
+
 /// Contig in a de Bruijn graph, represented as a suite of nodes
-#[derive(Debug, Clone)]
+#[derive(Encode, Decode, Debug, Clone)]
 pub struct Contig {
-    pub nodes_encoding: NodesEncoding,
+    pub nodes_encoding: ExtensionVec,
     pub start_offset: usize,
     pub end_offset: usize,
 }
@@ -86,30 +111,53 @@ impl Contig {
     /// Returns the sequence of the contig
     pub fn sequence(&self, graph: &Graph<impl KmerStorage>) -> String {
         let seq = self.nodes_encoding.sequence(graph);
-        seq[self.start_offset..seq.len() - self.end_offset].to_string() // TODO: more efficient way of slicing ?
+        seq[self.start_offset..seq.len() - self.end_offset].to_string()
     }
 }
 
 /// Scaffold in a de Bruijn graph, represented as an alternance of contigs and gaps of a given size.
-#[derive(Debug, Clone)]
+#[derive(Encode, Decode, Debug, Clone)]
 pub struct Scaffold {
     pub id: String,
-    pub contigs: Vec<(usize, Contig)>,
-    pub end_gap: usize,
+    pub contigs: Vec<Contig>,
+    pub gaps: Vec<usize>,
 }
 
 impl Scaffold {
     /// Returns the sequence of the scaffold
     pub fn sequence(&self, graph: &Graph<impl KmerStorage>) -> String {
-        let mut seq = String::new();
-        for (gap_size, contig) in &self.contigs {
-            seq.push_str(&"N".repeat(*gap_size));
+        assert_eq!(
+            self.contigs.len() + 1,
+            self.gaps.len(),
+            "Expected one mor gap than contigs, but got {} contigs and {} gaps",
+            self.contigs.len(),
+            self.gaps.len()
+        );
+        let mut seq = "N".repeat(self.gaps[0]);
+        for (contig, gap) in std::iter::zip(&self.contigs, &self.gaps[1..]) {
             seq.push_str(&contig.sequence(graph));
+            seq.push_str(&"N".repeat(*gap));
         }
-        seq.push_str(&"N".repeat(self.end_gap));
         seq
     }
+
+    /// Prints statistics about the scaffold
+    pub fn print_stats(&self, graph: &Graph<impl KmerStorage>) {
+        println!("Scaffold ID: {}", self.id);
+        println!("Number of contigs: {}", self.contigs.len());
+        let sum = self
+            .contigs
+            .iter()
+            .map(|c| c.nodes_encoding.0.len())
+            .sum::<usize>();
+        println!("Number of extensions in contigs: {}", sum);
+        println!("Total length: {}", self.sequence(graph).len());
+    }
 }
+
+//####################################################################################
+//                                  Encoder                                         //
+//####################################################################################
 
 /// Parameters for the encoder
 pub struct EncoderParams {
@@ -129,26 +177,26 @@ impl<'a, K: KmerStorage> Encoder<'a, K> {
     /// Encode a scaffold from a sequence (containing non ACGT bases).
     pub fn encode_record(&self, id: String, seq: &[u8]) -> Result<Scaffold, PathwayError> {
         let mut contigs = Vec::new();
-        let mut count_n = 0;
+        let mut gaps = Vec::new();
+        let mut gap_size = 0;
         for contig in seq.normalize(false).split(|c| *c == b'N') {
             if contig.is_empty() {
-                count_n += 1;
+                gap_size += 1;
                 continue;
             };
+            gaps.push(gap_size);
             let contig = self.encode_contig(&contig)?;
-            contigs.push((count_n, contig));
-            count_n = 0;
+            contigs.push(contig);
+            gap_size = 0;
         }
-        Ok(Scaffold {
-            id,
-            contigs,
-            end_gap: count_n,
-        })
+        gaps.push(gap_size);
+
+        Ok(Scaffold { id, contigs, gaps })
     }
 
     /// Encode a contig from a sequence (containing only ACGT bases).
-    pub fn encode_contig(&self, seq: &[u8]) -> Result<Contig, PathwayError> {
-        let seq = PackedSeqVec::from_ascii(seq);
+    pub fn encode_contig(&self, seq_in: &[u8]) -> Result<Contig, PathwayError> {
+        let seq = PackedSeqVec::from_ascii(seq_in);
         let mut iterator = NodeIterator::new(self.graph, seq)?;
         let mut nodes = Vec::new();
         while let Some(node) = iterator.next()? {
@@ -163,9 +211,10 @@ impl<'a, K: KmerStorage> Encoder<'a, K> {
     }
 
     /// Encode a list of nodes using the different extensions.
-    pub fn encode_path(&self, nodes: &Vec<Node>) -> NodesEncoding {
-        let start_node = nodes[0];
-        let mut extensions = Vec::new();
+    pub fn encode_path(&self, nodes: &Vec<Node>) -> ExtensionVec {
+        let mut extensions = vec![Extension::TargetNode(
+            *nodes.first().expect("The node vector is empty"),
+        )];
 
         let mut current_position = 0;
         let mut repetitions = self.get_repetitions(&nodes);
@@ -187,7 +236,7 @@ impl<'a, K: KmerStorage> Encoder<'a, K> {
                 }
                 // if the shortest path is long enough, we use it to extend the path
                 if length >= self.params.min_sp_length {
-                    let ext = Extension::ShortestPath(target_node);
+                    let ext = Extension::TargetNode(target_node);
                     println!("{:?}:{}", ext, length);
                     extensions.push(ext);
                 }
@@ -208,16 +257,16 @@ impl<'a, K: KmerStorage> Encoder<'a, K> {
                 current_position += length as usize;
             }
             // add the repetition
-            let ext = Extension::Repetition((repetition.1, repetition.2));
+            let ext = Extension::Repetition {
+                nb_repeats: repetition.1,
+                offset: repetition.2,
+            };
             println!("{:?}", ext);
             extensions.push(ext);
             current_position += repetition.1 as usize;
         }
         extensions.pop(); // remove the sentinel
-        NodesEncoding {
-            start_node,
-            extensions,
-        }
+        ExtensionVec(extensions)
     }
 
     // Search for repetitions in a list using Lempel-Ziv

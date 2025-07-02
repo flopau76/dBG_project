@@ -49,6 +49,7 @@ fn node_iterator() {
 #[test]
 fn easy_seq_encoding() {
     let (seq, graph) = make_compacted_graph(false);
+    let seq = PackedSeqVec::from_ascii(b"gggccccggga");
 
     let encoder_params = EncoderParams {
         min_nb_repeats: 10 as u16,
@@ -64,8 +65,6 @@ fn easy_seq_encoding() {
     let path_in: Vec<Node> = NodeIterator::new(&graph, seq.clone()).unwrap().collect();
     let encoding = encoder.encode_path(&path_in);
     let path_out = encoding.decode(&graph);
-
-    println!("encoding: {:?}", encoding);
 
     assert_eq!(path_in.len(), path_out.len());
     assert_eq!(path_in, path_out);
