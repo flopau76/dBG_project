@@ -90,7 +90,9 @@ fn easy_serialize() {
     extensions.push(Extension::TargetNode(Node::new(1, true)));
     extensions.push(Extension::TargetNode(Node::new(2, true)));
     extensions.push(Extension::TargetNode(Node::new(500, true)));
-    extensions.push(Extension::TargetNode(Node::new(500, false)));
+    extensions.push(Extension::TargetNode(Node::new(500, true)));
+    extensions.push(Extension::TargetNode(Node::new(5000000, true)));
+    extensions.push(Extension::TargetNode(Node::new(5000000, true)));
     extensions.push(Extension::NextNucleotide(0));
     extensions.push(Extension::NextNucleotide(0));
     extensions.push(Extension::NextNucleotide(0));

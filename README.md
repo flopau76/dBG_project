@@ -25,7 +25,7 @@ ggcat build -k $K_SIZE $INPUT_FASTA -o $OUTPUT_UNITIGS --min-multiplicity 1
 ## Generating a graph
 First of all, we must convert the list of unitigs into a binary graph, with the following command:
 ```bash
-rust_dbg -g $PATH_GRAPH -k $K_SIZE build -i $INPUT_PATH
+rust_dbg -k $K_SIZE build -i $INPUT_PATH -o  $OUTPUT_PATH 
 ```
 By default, kmers are considered as canonical. If not, use the flag `--forward-only`.
 
@@ -35,7 +35,7 @@ By default, kmers are considered as canonical. If not, use the flag `--forward-o
 ## En-/decoding a path
 The core of the project consists in embedding continuous sequences as paths in the graph. Those paths are described in a custom text format. To generate one, use the command `encode`:
 ```bash
-rust_dbg -g $PATH_GRAPH -k $K_SIZE encode -i $INPUT_FASTA -o $OUTPUT_ENCODING
+rust_dbg -k $K_SIZE encode -i $INPUT_FASTA -o $OUTPUT_ENCODING -g $PATH_GRAPH 
 ```
 The encoding is composed of a start node, and a list of extensions of the following format:
 - SP(target node): shortest path to the given node
@@ -47,14 +47,14 @@ The encoding is composed of a start node, and a list of extensions of the follow
 
 The command `decode` performs the reverse operation, by retrieving a sequence from a path:
 ```bash
-rust_dbg -g $PATH_GRAPH -k $K_SIZE decode -i $INPUT_ENCODING -o $OUTPUT_FASTA
+rust_dbg -k $K_SIZE decode -i $INPUT_ENCODING -o $OUTPUT_FASTA -g $PATH_GRAPH
 ```
 ## Stats
 Some basic stats on the graph can be obtained with the command `stats-g`:
 ```bash
-rust_dbg -g $PATH_GRAPH -k $K_SIZE stats-g
+rust_dbg -k $K_SIZE stats-g -i $PATH_GRAPH
 ```
 For an already encoded path, the command `stats-p` will print some information about the weight and the efficiency of the encoding.
 ```bash
-rust_dbg -g $PATH_GRAPH -k $K_SIZE stats-p -i $INPUT_ENCODING
+rust_dbg -k $K_SIZE stats-p -i $INPUT_ENCODING -g $PATH_GRAPH
 ```

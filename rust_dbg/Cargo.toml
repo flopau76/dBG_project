@@ -11,6 +11,7 @@ smallvec = "1"
 epserde = "0.8"
 # epserde-derive = "0.8"
 bincode = { version = "2" }
+vint64 = "1"
 clap = { version = "4", features = ["derive"] }
 
 [dev-dependencies]

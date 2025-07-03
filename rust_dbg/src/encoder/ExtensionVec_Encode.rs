@@ -114,7 +114,10 @@ use bincode::{BorrowDecode, Decode, Encode};
 
 impl Encode for Patch {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
-        assert!(self.len() < 64, "Patch length exceeds maximum of 63");
+        assert!(
+            self.len() < (1 << 6),
+            "Patch length exceeds maximum of 6 bits"
+        );
         match self {
             Self::TargetNode(nodes) => {
                 let id = (nodes.len() as u8) << 2 | 0;
