@@ -12,8 +12,8 @@ use crate::{Graph, KmerStorage, Node, NodeIterator, PathwayError, Side};
 //                        Extension  &  ExtensionVec                                //
 //####################################################################################
 
-#[derive(Encode, Decode, Copy, Clone)]
 /// An enum containing different ways to encode a path extension.
+#[derive(Encode, Decode, Copy, Clone)]
 pub enum Extension {
     TargetNode(Node),
     NextNucleotide(u8),
@@ -34,7 +34,7 @@ impl Debug for Extension {
 
 /// A vector of extensions, describing a path in a de Bruijn graph.
 #[derive(Encode, Decode, Debug, Clone)]
-pub struct ExtensionVec(Vec<Extension>);
+pub struct ExtensionVec(pub Vec<Extension>);
 
 impl ExtensionVec {
     /// Converts the vector of extensions into a suite of nodes in the graph.
@@ -224,7 +224,7 @@ impl<'a, K: KmerStorage> Encoder<'a, K> {
         while let Some(repetition) = repetitions.pop_front() {
             let target_pos = repetition.0 - 1;
             while current_position < target_pos {
-                let (mut target_node, mut length) = shortest_path::get_next_target_node(
+                let (mut target_node, mut length) = shortest_path::get_next_target_node_naive(
                     self.graph,
                     &nodes,
                     current_position,

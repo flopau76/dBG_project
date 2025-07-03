@@ -198,6 +198,7 @@ fn shortcut_from_side(
 /// Returns `(target_node, dist)`, such that:  
 ///  - `target_node`=`path[start_pos + dist]`  
 ///  - `path[start_pos..=start_pos+dist]` corresponds to the shortest path between `path[start_pos]`` and `target_node`.
+#[deprecated = "This is not working properly for now. Use get_next_target_node_naive instead."]
 pub fn get_next_target_node<K: KmerStorage>(
     graph: &Graph<K>,
     path: &Vec<Node>,
@@ -241,7 +242,7 @@ pub fn get_next_target_node<K: KmerStorage>(
         let mut pos_right = end_pos;
 
         // advance BFS
-        while pos_left + 1 < pos_right && new_end_pos == end_pos {
+        while pos_left < pos_right && new_end_pos == end_pos {
             // choose the smaller side to elongate
             let side = if queue_left.len() < queue_right.len() {
                 pos_left += 1;
@@ -254,8 +255,7 @@ pub fn get_next_target_node<K: KmerStorage>(
             let parents = side.choose(&mut parents_left, &mut parents_right);
             // advance the BFS from the given side
             advance_bfs_parents_all(graph, side, queue, parents);
-            // TODO: check for multiple paths of the same length
-            // check for shortcuts
+            // check if we found a shortcut
             new_end_pos = new_end_pos.min(shortcut_from_side(
                 queue,
                 &parents_left,
@@ -273,4 +273,59 @@ pub fn get_next_target_node<K: KmerStorage>(
         }
         return Some((path[end_pos], end_pos - start_pos));
     }
+}
+
+/// Perform a (single-ended) BFS to find the next target_node to elongate `path` from `start_pos`.  
+/// Returns `(target_node, dist)`, such that:  
+///  - `target_node`=`path[start_pos + dist]`  
+///  - `path[start_pos..=start_pos+dist]` corresponds to the shortest path between `path[start_pos]`` and `target_node`.
+pub fn get_next_target_node_naive<K: KmerStorage>(
+    graph: &Graph<K>,
+    path: &Vec<Node>,
+    start_pos: usize,
+    max_depth: usize,
+) -> Option<(Node, usize)> {
+    // no need to encode further nodes
+    if start_pos >= path.len() - 1 {
+        return None;
+    }
+
+    // look for duplicates in the path: a shortest path cannot pass through the same node twice (except the first node)
+    let mut new_end_pos = std::cmp::min(start_pos + max_depth, path.len() - 1);
+    let mut seen = HashSet::new();
+    for (pos, node) in path[start_pos..=new_end_pos].iter().enumerate() {
+        if seen.contains(node) {
+            new_end_pos = if node == &path[start_pos] {
+                start_pos + pos
+            } else {
+                start_pos + pos - 1
+            };
+            break;
+        }
+        seen.insert(node);
+    }
+
+    // init BFS
+    let mut parents: HashMap<Node, Vec<Node>> = HashMap::new();
+    let mut queue = vec![path[start_pos]];
+    let mut current_pos = start_pos;
+
+    while current_pos < new_end_pos {
+        // advance BFS
+        current_pos += 1;
+        advance_bfs_parents_all(graph, Side::Left, &mut queue, &mut parents);
+        // check if multiple parents exist for the current node
+        if parents[&path[current_pos]].len() > 1 {
+            new_end_pos = current_pos - 1;
+            break;
+        }
+        // check if we found a shortcut
+        for pos in current_pos + 1..=new_end_pos {
+            if parents.contains_key(&path[pos]) {
+                new_end_pos = pos - 1;
+                break;
+            }
+        }
+    }
+    return Some((path[new_end_pos], new_end_pos - start_pos));
 }
