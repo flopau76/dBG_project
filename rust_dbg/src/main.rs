@@ -5,7 +5,7 @@ use rust_dbg::{Graph, KmerStorage};
 use needletail::parse_fastx_file;
 
 use std::fs::File;
-use std::io::{BufReader, BufWriter};
+use std::io::{BufReader, BufWriter, Write};
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
@@ -159,7 +159,24 @@ impl Commands {
                 output,
                 graph,
             } => {
-                todo!();
+                let mut input_reader = BufReader::new(File::open(input).unwrap());
+                let mut output_writer = BufWriter::new(File::create(output).unwrap());
+                let graph = Graph::<KS>::load_from_binary(graph).unwrap();
+                while let Ok(scaffold) = bincode::decode_from_std_read::<Scaffold, _, _>(
+                    &mut input_reader,
+                    bincode::config::standard(),
+                ) {
+                    let header = format!(">{}\n", scaffold.id);
+                    let seq = scaffold.sequence(&graph);
+                    output_writer.write_all(header.as_bytes()).unwrap();
+                    output_writer.write_all(seq.as_bytes()).unwrap();
+                    output_writer.write_all(b"\n").unwrap();
+                    eprintln!("Decoded scaffold: {}", scaffold.id);
+                }
+                eprintln!(
+                    "Decoding completed. Output written to: {}",
+                    output.display()
+                );
             }
             Commands::StatsP { input, graph } => {
                 let mut input_reader = BufReader::new(File::open(input).unwrap());

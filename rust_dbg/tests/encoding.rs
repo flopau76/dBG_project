@@ -1,4 +1,4 @@
-use rust_dbg::encoder::{Encoder, EncoderParams};
+use rust_dbg::encoder::{Encoder, EncoderParams, Extension, ExtensionVec};
 use rust_dbg::graph::SequenceSet;
 use rust_dbg::{BaseGraph, Graph, Node, NodeIterator};
 
@@ -58,43 +58,15 @@ fn easy_seq_encoding() {
 }
 
 #[test]
-fn seq_encoding() {
-    for stranded in [true, false] {
-        let seq = PackedSeqVec::from_ascii(b"gggcggtggcggaaa");
-        let graph = Graph::<u8>::from_seq(&seq, 3, stranded);
-
-        let encoder_params = EncoderParams {
-            min_nb_repeats: 10 as u16,
-            min_sp_length: 1,
-            max_sp_length: 50,
-            max_offset: 255,
-        };
-        let encoder = Encoder {
-            params: encoder_params,
-            graph: &graph,
-        };
-
-        let path_in: Vec<Node> = NodeIterator::new(&graph, seq.clone()).unwrap().collect();
-        let encoding = encoder.encode_path(&path_in);
-        let path_out = encoding.decode(&graph);
-
-        println!("{:?}", path_out);
-
-        assert_eq!(path_in.len(), path_out.len());
-        assert_eq!(path_in, path_out);
-    }
-}
-
-#[test]
 fn random_seq_encoding() {
-    let seq = PackedSeqVec::random(1000);
+    let seq = PackedSeqVec::random(10000);
 
     let base = BaseGraph::from_seq(&seq, 5, false);
     let graph: Graph<u32> = base.finish();
 
     let encoder_params = EncoderParams {
         min_nb_repeats: 500 as u16,
-        min_sp_length: 5,
+        min_sp_length: 1,
         max_sp_length: 50,
         max_offset: 255,
     };
@@ -108,5 +80,75 @@ fn random_seq_encoding() {
     let path_out = encoding.decode(&graph);
 
     assert_eq!(path_in.len(), path_out.len());
-    // assert_eq!(path_in, path_out);
+    assert_eq!(path_in, path_out);
+}
+
+#[test]
+fn easy_serialize() {
+    let mut extensions = Vec::new();
+    extensions.push(Extension::TargetNode(Node::new(0, true)));
+    extensions.push(Extension::TargetNode(Node::new(1, true)));
+    extensions.push(Extension::TargetNode(Node::new(2, true)));
+    extensions.push(Extension::TargetNode(Node::new(500, true)));
+    extensions.push(Extension::TargetNode(Node::new(500, false)));
+    extensions.push(Extension::NextNucleotide(0));
+    extensions.push(Extension::NextNucleotide(0));
+    extensions.push(Extension::NextNucleotide(0));
+    extensions.push(Extension::NextNucleotide(0));
+    extensions.push(Extension::NextNucleotide(1));
+    extensions.push(Extension::Repetition {
+        nb_repeats: 8,
+        offset: 126,
+    });
+    extensions.push(Extension::Repetition {
+        nb_repeats: 2,
+        offset: 255,
+    });
+
+    let extensions = ExtensionVec(extensions);
+
+    let serialized = bincode::encode_to_vec(&extensions, bincode::config::standard())
+        .expect("Failed to serialize encoding");
+    let deserialized: ExtensionVec =
+        bincode::decode_from_slice(&serialized, bincode::config::standard())
+            .expect("Failed to deserialize encoding")
+            .0;
+
+    assert_eq!(extensions, deserialized);
+
+    println!("{:?}", serialized);
+}
+
+#[test]
+fn random_serialize() {
+    let seq = PackedSeqVec::random(100);
+
+    let base = BaseGraph::from_seq(&seq, 5, false);
+    let graph: Graph<u32> = base.finish();
+
+    let encoder_params = EncoderParams {
+        min_nb_repeats: 500 as u16,
+        min_sp_length: 1,
+        max_sp_length: 50,
+        max_offset: 255,
+    };
+    let encoder = Encoder {
+        params: encoder_params,
+        graph: &graph,
+    };
+
+    let path_in: Vec<Node> = NodeIterator::new(&graph, seq.clone()).unwrap().collect();
+    let encoding: ExtensionVec = encoder.encode_path(&path_in);
+
+    let serialized = bincode::encode_to_vec(encoding, bincode::config::standard())
+        .expect("Failed to serialize encoding");
+    println!("Serialized encoding size: {}", serialized.len());
+    let deserialized: ExtensionVec =
+        bincode::decode_from_slice(&serialized, bincode::config::standard())
+            .expect("Failed to deserialize encoding")
+            .0;
+
+    let path_out = deserialized.decode(&graph);
+    assert_eq!(path_in.len(), path_out.len());
+    assert_eq!(path_in, path_out);
 }

@@ -8,12 +8,17 @@ use packed_seq::{PackedSeqVec, Seq, SeqVec};
 use crate::graph::shortest_path;
 use crate::{Graph, KmerStorage, Node, NodeIterator, PathwayError, Side};
 
+#[allow(non_snake_case)]
+mod ExtensionVec_Encode;
+#[allow(non_snake_case)]
+mod Node_Encode;
+
 //####################################################################################
 //                        Extension  &  ExtensionVec                                //
 //####################################################################################
 
 /// An enum containing different ways to encode a path extension.
-#[derive(Encode, Decode, Copy, Clone)]
+#[derive(Encode, Decode, Copy, Clone, PartialEq, Eq)]
 pub enum Extension {
     TargetNode(Node),
     NextNucleotide(u8),
@@ -33,7 +38,7 @@ impl Debug for Extension {
 }
 
 /// A vector of extensions, describing a path in a de Bruijn graph.
-#[derive(Encode, Decode, Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtensionVec(pub Vec<Extension>);
 
 impl ExtensionVec {

@@ -5,7 +5,6 @@ use std::fmt::Debug;
 use std::ops::Range;
 use std::{collections::HashSet, error::Error, path::Path};
 
-use bincode::{Decode, Encode};
 use boomphf::hashmap::NoKeyBoomHashMap;
 use epserde::prelude::*;
 use needletail::parse_fastx_file;
@@ -84,7 +83,7 @@ impl SequenceSet {
 //####################################################################################
 
 /// Oriented node in a canonical de Bruijn graph
-#[derive(Encode, Decode, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Node {
     pub id: usize,
     pub is_rc: bool,
@@ -308,7 +307,6 @@ impl BaseGraph {
         // create the graph
         Graph {
             base: self,
-            edges: vec![],
             left_kmers: left_kmers_mphf,
             right_kmers: right_kmers_mphf,
         }
@@ -344,7 +342,6 @@ impl BaseGraph {
 #[derive(Debug)]
 pub struct Graph<KS: KmerStorage> {
     base: BaseGraph,
-    edges: Vec<usize>,
     left_kmers: NoKeyBoomHashMap<KS, usize>,
     right_kmers: NoKeyBoomHashMap<KS, usize>,
 }
