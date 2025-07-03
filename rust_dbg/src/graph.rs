@@ -219,7 +219,6 @@ impl BaseGraph {
     }
 
     /// Create a (non-compacted) graph from a packed sequence. (For debugging mainly)
-    #[deprecated = "warning: the obtained graph will not be compacted"]
     pub fn from_seq<'a>(seq: &PackedSeqVec, k: usize, stranded: bool) -> Self {
         if k > 32 {
             panic!("Unsuported kmer size: {}. Maximum is 32.", k);
@@ -249,7 +248,6 @@ impl BaseGraph {
     }
 
     /// Create a (non-compacted) graph from an ascii sequence. (For debugging mainly)
-    #[deprecated = "warning: the obtained graph will not be compacted"]
     pub fn from_seq_ascii<'a>(seq: &[u8], k: usize, stranded: bool) -> Self {
         let seq = PackedSeqVec::from_ascii(seq);
         Self::from_seq(&seq, k, stranded)

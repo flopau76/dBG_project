@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 use std::fmt::Debug;
+use std::ops::Add;
 
 use bincode::{Decode, Encode};
 use needletail::Sequence;
@@ -157,6 +158,36 @@ impl Scaffold {
             .sum::<usize>();
         println!("Number of extensions in contigs: {}", sum);
         println!("Total length: {}", self.sequence(graph).len());
+    }
+}
+
+//####################################################################################
+//                                  Stats                                           //
+//####################################################################################
+
+struct Stats {
+    nb_repeats: usize,
+    nodes_repeats: usize,
+    nb_target: usize,
+    nodes_target: usize,
+    nb_nucleo: usize,
+    gap_count: usize,
+    gap_size: usize,
+}
+
+impl Add for Stats {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        Stats {
+            nb_repeats: self.nb_repeats + other.nb_repeats,
+            nodes_repeats: self.nodes_repeats + other.nodes_repeats,
+            nb_target: self.nb_target + other.nb_target,
+            nodes_target: self.nodes_target + other.nodes_target,
+            nb_nucleo: self.nb_nucleo + other.nb_nucleo,
+            gap_count: self.gap_count + other.gap_count,
+            gap_size: self.gap_size + other.gap_size,
+        }
     }
 }
 
