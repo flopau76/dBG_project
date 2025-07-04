@@ -4,3 +4,6 @@ todo.txt
 report.md
 *.fa
 *.txt
+nextflow/**
+!nextflow/nextflow.config
+!nextflow/main.nf
