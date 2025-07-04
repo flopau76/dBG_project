@@ -2,3 +2,7 @@ data/**
 !data/*.sh
 todo.txt
 report.md
+
+nextflow/**
+!nextflow/nextflow.config
+!nextflow/main.nf

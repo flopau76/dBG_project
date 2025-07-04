@@ -1,23 +1,15 @@
-params.stranded = false
-params.k = 23
-
-params.input_files = "/home/florence/Documents/dbg_project/data/scerevisiae/*.fa.gz"
-
-params.rust = "/home/florence/Documents/dbg_project/rust_dbg/target/release/rust_dbg"
-
 process make_unitigs {
     conda 'bioconda::ggcat'
     
     input:
-    path input_files
+    path fasta_files
     
     output:
     path "k${params.k}.unitigs"
 
     script:
     """
-    echo launching command: ggcat build -k ${params.k} $input_files --min-multiplicity 1 -o "k${params.k}.unitigs"
-    ggcat build -k ${params.k} $input_files --min-multiplicity 1 -o "k${params.k}.unitigs"
+    ggcat build -k ${params.k} $fasta_files --min-multiplicity 1 -o "k${params.k}.unitigs"
     """
 }
 
@@ -26,11 +18,26 @@ process build_graph {
     path unitigs
 
     output:
-    path "k${params.k}.unitigs"
+    path "k${params.k}.bin"
 
     script:
     """
-    ${params.rust} -k ${params.k} build -i $unitigs -o "k${params.k}.unitigs"
+    ${params.rust} -k ${params.k} build -i $unitigs -o "k${params.k}.bin"
+    """
+}
+
+process encode_path {
+    input:
+    path bin_graph
+    path fasta_file
+
+    output:
+    path "${fasta_file}.encoding"
+    path "${fasta_file}.encoding.txt"
+
+    script:
+    """
+    ${params.rust} -k ${params.k} encode -i $fasta_file -g $bin_graph  -o "${fasta_file}.encoding" > "${fasta_file}.encoding.txt"
     """
 }
 
@@ -40,4 +47,5 @@ workflow {
     println "Input sequences: ${input_files}"
     make_unitigs(input_files)
     build_graph(make_unitigs.out)
+    encode_path(build_graph.out, input_files)   // TODO: is this done separately for each file in input_files ?
 }
