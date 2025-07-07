@@ -1,3 +1,5 @@
+#!/bin/bash
+
 ### THIS SCRIPTS EXPECTS TO RECEIVE AS INPUT A TXT FILE WITH A LIST OF GENOMES IN FASTA FILES
 ### IT EXPECTS THE FIRST GENOME TO BE A REFERENCE, I.E. BEING ASSEMBLED AT CHROMOSOME LEVEL
 ### SO ALL THE SEQUENCES OF THE OTHER GENOMES WILL BE COMPARED TO IT TO DECIDE IN WHICH CLUSTER
@@ -5,14 +7,26 @@
 
 ### IT OUTPUTS A LIST OF FASTAS CONTAINING THE READS CLUSTERED BY REFERENCE CHROMOSOME
 
-#!/bin/bash
+
 
 set -e 
 
 SCRIPT_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 
-# cd "$SCRIPT_DIR"
+DASHING_DEFAULT=$SCRIPT_DIR/dashing
 
+# check if dashing is installed
+if ! command -v dashing &> /dev/null; then
+    # check if an executable exists at the default location
+    if [[ -x "$DASHING_DEFAULT/dashing" ]]; then
+        echo "Using dashing executable at default location: $DASHING_DEFAULT"
+        export PATH="$DASHING_DEFAULT:$PATH"
+    else
+        echo "dashing is not found on PATH nor at default location: $DASHING_DEFAULT"
+        echo "Please install it or add it to the path."
+        exit 1
+    fi
+fi
 
 CORES_NUMBER=$(getconf _NPROCESSORS_ONLN)
 # Default values
@@ -81,7 +95,7 @@ DISTANCE_MATRIX=$TEMP_DIR/distance.tsv
 mkdir -p $CLUSTERS_DIR
 REF_GENOME_FILE=$(head -n1 $INPUT_FILE)
 echo "REF GENOME: $REF_GENOME_FILE"
-./scripts/divide_by_sequences.sh $CLUSTERS_DIR > $CLUSTERS_LIST < "$REF_GENOME_FILE"
+$SCRIPT_DIR/divide_by_sequences.sh $CLUSTERS_DIR > $CLUSTERS_LIST < "$REF_GENOME_FILE"
 echo "CLUSTERS LIST : $CLUSTERS_LIST"
 ### 1b. RUN DASHING SKETCHING TO SKETCH THE SEQUENCE
 # Sketching the chromosomes and creating a combined archived
@@ -97,7 +111,7 @@ while IFS= read -r CURRENT_FASTA; do
         mkdir $CURRENT_GENOME_DIR $CURRENT_GENOME_SKETCH_DIR
     
         # dividing sequences into single files
-        ./scripts/divide_by_sequences.sh $CURRENT_GENOME_DIR > $CURRENT_GENOME_LIST < $CURRENT_FASTA
+        $SCRIPT_DIR/divide_by_sequences.sh $CURRENT_GENOME_DIR > $CURRENT_GENOME_LIST < $CURRENT_FASTA
         
         # sketching sequences
         echo "RUNNING dashing sketch -k$KMER_SIZE -p$CORES_NUMBER --use-bb-minhash -F $CURRENT_GENOME_LIST -P $CURRENT_GENOME_SKETCH_DIR/"
