@@ -1,11 +1,13 @@
 use std::collections::VecDeque;
 use std::fmt::Debug;
+use std::iter::Sum;
 use std::ops::Add;
 
 use bincode::{Decode, Encode};
 use needletail::Sequence;
 use packed_seq::{PackedSeqVec, Seq, SeqVec};
 
+use crate::format_int;
 use crate::graph::shortest_path;
 use crate::{Graph, KmerStorage, Node, NodeIterator, PathwayError, Side};
 
@@ -99,6 +101,110 @@ impl ExtensionVec {
         let nodes = self.decode(graph);
         unsafe { String::from_utf8_unchecked(graph.path_seq(&nodes)) }
     }
+
+    /// Get statistics about the node encoding
+    fn get_stats(&self, graph: &Graph<impl KmerStorage>) -> StatsEncoding {
+        let mut nucleo_count = 0;
+        let mut targets_count = 0;
+        let mut reps_count = 0;
+        let mut reps_nodes = 0;
+
+        for ext in &self.0 {
+            match ext {
+                Extension::TargetNode(_) => {
+                    targets_count += 1;
+                }
+                Extension::NextNucleotide(_) => nucleo_count += 1,
+                Extension::Repetition {
+                    nb_repeats,
+                    offset: _,
+                } => {
+                    reps_count += 1;
+                    reps_nodes += *nb_repeats as usize;
+                }
+            }
+        }
+
+        let total_nodes = self.decode(graph).len();
+
+        StatsEncoding {
+            nucleo_count,
+            targets_count,
+            reps_count,
+            nucleo_nodes: nucleo_count,
+            targets_nodes: total_nodes - nucleo_count - reps_nodes,
+            reps_nodes,
+        }
+    }
+}
+
+struct StatsEncoding {
+    nucleo_count: usize,
+    targets_count: usize,
+    reps_count: usize,
+    nucleo_nodes: usize,
+    targets_nodes: usize,
+    reps_nodes: usize,
+}
+
+impl Add for StatsEncoding {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        StatsEncoding {
+            nucleo_count: self.nucleo_count + other.nucleo_count,
+            targets_count: self.targets_count + other.targets_count,
+            reps_count: self.reps_count + other.reps_count,
+            nucleo_nodes: self.nucleo_nodes + other.nucleo_nodes,
+            targets_nodes: self.targets_nodes + other.targets_nodes,
+            reps_nodes: self.reps_nodes + other.reps_nodes,
+        }
+    }
+}
+
+impl Sum for StatsEncoding {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        iter.fold(
+            StatsEncoding {
+                nucleo_count: 0,
+                targets_count: 0,
+                reps_count: 0,
+                nucleo_nodes: 0,
+                targets_nodes: 0,
+                reps_nodes: 0,
+            },
+            |acc, x| acc + x,
+        )
+    }
+}
+
+impl StatsEncoding {
+    fn print(&self) {
+        let total_count = self.nucleo_count + self.targets_count + self.reps_count;
+        let total_nodes = self.nucleo_nodes + self.targets_nodes + self.reps_nodes;
+
+        eprintln!("       Method | Number of extensions | Number of encoded nodes ");
+        eprintln!("--------------|-------------------------|-----------------");
+        for (name, count, nodes) in [
+            ("Next node", self.nucleo_count, self.nucleo_nodes),
+            ("Target node", self.targets_count, self.targets_nodes),
+            ("Repetition", self.reps_count, self.reps_nodes),
+        ] {
+            eprintln!(
+                "{:>13} | {:>14}  ({:>4.1}%) | {:>11} bits ({:>4.1}%)",
+                name,
+                format_int(count),
+                count as f64 / total_count as f64 * 100.0,
+                format_int(nodes),
+                nodes as f64 / total_nodes as f64 * 100.0,
+            );
+        }
+        eprintln!(
+            "        Total | {:>14}          | {:>11} bits",
+            format_int(total_count),
+            format_int(total_nodes),
+        );
+    }
 }
 
 //####################################################################################
@@ -118,6 +224,10 @@ impl Contig {
     pub fn sequence(&self, graph: &Graph<impl KmerStorage>) -> String {
         let seq = self.nodes_encoding.sequence(graph);
         seq[self.start_offset..seq.len() - self.end_offset].to_string()
+    }
+    /// Get statistics about the underlying node encoding
+    fn get_stats(&self, graph: &Graph<impl KmerStorage>) -> StatsEncoding {
+        self.nodes_encoding.get_stats(graph)
     }
 }
 
@@ -149,45 +259,14 @@ impl Scaffold {
 
     /// Prints statistics about the scaffold
     pub fn print_stats(&self, graph: &Graph<impl KmerStorage>) {
-        println!("Scaffold ID: {}", self.id);
-        println!("Number of contigs: {}", self.contigs.len());
-        let sum = self
+        println!(">{}", self.id);
+        let stats = self
             .contigs
             .iter()
-            .map(|c| c.nodes_encoding.0.len())
-            .sum::<usize>();
-        println!("Number of extensions in contigs: {}", sum);
-        println!("Total length: {}", self.sequence(graph).len());
-    }
-}
-
-//####################################################################################
-//                                  Stats                                           //
-//####################################################################################
-
-struct Stats {
-    nb_repeats: usize,
-    nodes_repeats: usize,
-    nb_target: usize,
-    nodes_target: usize,
-    nb_nucleo: usize,
-    gap_count: usize,
-    gap_size: usize,
-}
-
-impl Add for Stats {
-    type Output = Self;
-
-    fn add(self, other: Self) -> Self {
-        Stats {
-            nb_repeats: self.nb_repeats + other.nb_repeats,
-            nodes_repeats: self.nodes_repeats + other.nodes_repeats,
-            nb_target: self.nb_target + other.nb_target,
-            nodes_target: self.nodes_target + other.nodes_target,
-            nb_nucleo: self.nb_nucleo + other.nb_nucleo,
-            gap_count: self.gap_count + other.gap_count,
-            gap_size: self.gap_size + other.gap_size,
-        }
+            .map(|c| c.get_stats(graph))
+            .sum::<StatsEncoding>();
+        stats.print();
+        eprintln!();
     }
 }
 

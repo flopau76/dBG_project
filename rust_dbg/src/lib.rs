@@ -50,34 +50,3 @@ pub fn format_int(n: usize) -> String {
 
     result.chars().rev().collect()
 }
-
-pub fn print_stats(nb_nn: usize, nb_r: usize, nb_sp: usize, nodes_r: usize, nodes_sp: usize) {
-    const NN_COST: usize = 2;
-    const SP_COST: usize = 32;
-    const R_COST: usize = 24;
-
-    let total_nodes = nb_nn + nodes_r + nodes_sp;
-    let total_cost = NN_COST * nb_nn + SP_COST * nb_sp + R_COST * nb_r;
-
-    eprintln!("\n       Method | Number of encoded nodes | Memory cost");
-    eprintln!("--------------|-------------------------|-----------------");
-    for (name, nodes, cost) in [
-        ("Next node", nb_nn, NN_COST * nb_nn),
-        ("Shortest path", nodes_sp, SP_COST * nb_sp),
-        ("Repetition", nodes_r, R_COST * nb_r),
-    ] {
-        eprintln!(
-            "{:>13} | {:>14}  ({:>4.1}%) | {:>11} bits ({:>4.1}%)",
-            name,
-            format_int(nodes),
-            nodes as f64 / total_nodes as f64 * 100.0,
-            format_int(cost),
-            cost as f64 / total_cost as f64 * 100.0
-        );
-    }
-    eprintln!(
-        "        Total | {:>14}  ( 100%) | {:>11} bits ( 100%)",
-        format_int(total_nodes),
-        format_int(total_cost),
-    );
-}
