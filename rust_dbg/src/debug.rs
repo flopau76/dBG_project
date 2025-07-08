@@ -1,16 +1,12 @@
 use std::collections::VecDeque;
-use std::error::Error;
-use std::path::Path;
 
-use needletail::parse_fastx_file;
-use packed_seq::Seq;
+use packed_seq::{PackedSeqVec, Seq, SeqVec};
 
-use crate::embeddings::{Extension, Scaffold, VecExtensions, VecNodes};
 use crate::graph::shortest_path;
-use crate::{Graph, KmerStorage};
-
+use crate::pathway::{Contig, Extension, Scaffold};
+use crate::{Graph, KmerStorage, Node, NodeIterator, PathwayError};
 //####################################################################################
-//                                 Encoder                                          //
+//                                  Encoder                                         //
 //####################################################################################
 
 /// Parameters for the encoder
@@ -28,28 +24,8 @@ pub struct Encoder<'a, K: KmerStorage> {
 }
 
 impl<'a, K: KmerStorage> Encoder<'a, K> {
-    pub fn encode_file(&self, input: &Path, output: &Path) -> Result<(), Box<dyn Error>> {
-        let mut input_reader = needletail::parse_fastx_file(input)?;
-        let mut output_writer = std::io::BufWriter::new(std::fs::File::create(output)?);
-
-        while let Some(record) = input_reader.next() {
-            let record = record?;
-            let id = unsafe { String::from_utf8_unchecked(record.id().to_owned()) };
-            let seq = record.seq();
-            eprintln!("Encoding record {}", id);
-            println!(">{}", id);
-            let scaffold: Scaffold<VecNodes> = Scaffold::from_seq(id, &seq, self.graph)?;
-            todo!();
-        }
-        Ok(())
-    }
-
-    pub fn decode_file(&self, input: &Path, output: &Path) -> Result<(), std::io::Error> {
-        todo!();
-    }
-
     /// Encode a list of nodes using the different extensions.
-    fn encode_path(&self, nodes: &VecNodes) -> VecExtensions {
+    pub fn encode_path(&self, nodes: &Vec<Node>) -> VecExtension {
         let mut extensions = vec![Extension::TargetNode(
             *nodes.first().expect("The node vector is empty"),
         )];
@@ -57,10 +33,10 @@ impl<'a, K: KmerStorage> Encoder<'a, K> {
 
         let mut current_position = 0;
         let mut repetitions = self.get_repetitions(&nodes);
-        repetitions.push_back((nodes.len(), (0, 0))); // add a sentinel to avoid adding the last part separately
+        repetitions.push_back((nodes.len(), 0, 0)); // add a sentinel to avoid adding the last part separately
 
-        while let Some((rep_pos, rep)) = repetitions.pop_front() {
-            let target_pos = rep_pos - 1;
+        while let Some(repetition) = repetitions.pop_front() {
+            let target_pos = repetition.0 - 1;
             while current_position < target_pos {
                 let (mut target_node, mut length) = shortest_path::get_next_target_node_naive(
                     self.graph,
@@ -96,19 +72,22 @@ impl<'a, K: KmerStorage> Encoder<'a, K> {
                 current_position += length as usize;
             }
             // add the repetition
-            let ext = Extension::Repetition(rep.0, rep.1);
+            let ext = Extension::Repetition {
+                nb_repeats: repetition.1,
+                offset: repetition.2,
+            };
             println!("{:?}", ext);
             extensions.push(ext);
-            current_position += rep.0 as usize;
+            current_position += repetition.1 as usize;
         }
         extensions.pop(); // remove the sentinel
-        VecExtensions(extensions)
+        ExtensionVec(extensions)
     }
 
     // Search for repetitions in a list using Lempel-Ziv
     // Return a Vector of (start, nb_repeats, offset) so that list[start .. start + nb_repeats] = list[start-1 - offset .. start-1- offset + nb_repeats]
     // Maximal offset and minimal number of repeats are defined in the parameters
-    fn get_repetitions<D: Eq>(&self, list: &Vec<D>) -> VecDeque<(usize, (u16, u8))> {
+    fn get_repetitions<D: Eq>(&self, list: &Vec<D>) -> VecDeque<(usize, u16, u8)> {
         let mut repetitions = VecDeque::new();
         let mut current_pos = 1;
 
@@ -133,7 +112,7 @@ impl<'a, K: KmerStorage> Encoder<'a, K> {
             }
             // if the repetition is long enough, add it to the list
             if best_nb_repeats >= self.params.min_nb_repeats as usize {
-                repetitions.push_back((current_pos, (best_nb_repeats as u16, best_offset as u8)));
+                repetitions.push_back((current_pos, best_nb_repeats as u16, best_offset as u8));
                 current_pos += best_nb_repeats;
             } else {
                 current_pos += 1;

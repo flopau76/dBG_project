@@ -3,9 +3,12 @@ This crates provides methods for the construction and the manipulation of de Bru
 */
 
 // pub mod encoder;
+pub mod embeddings;
 pub mod encoder;
 pub mod graph;
 pub mod kmer;
+
+mod bincode;
 
 // pub use ... for re-exports;
 use std::io::Write;
@@ -33,20 +36,4 @@ pub fn print_progress_bar(current: usize, total: usize) {
     );
     eprint!("\r{}", bar); // carriage return to overwrite the current line
     std::io::stderr().flush().unwrap();
-}
-
-/// Format a long integer with commas
-pub fn format_int(n: usize) -> String {
-    let s = n.to_string();
-    let mut result = String::new();
-    let mut chars = s.chars().rev().peekable();
-
-    while let Some(c) = chars.next() {
-        result.push(c);
-        if chars.peek().is_some() && result.len() % 4 == 3 {
-            result.push(',');
-        }
-    }
-
-    result.chars().rev().collect()
 }
