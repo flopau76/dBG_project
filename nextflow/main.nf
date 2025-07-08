@@ -10,7 +10,7 @@ process build_graph {
     script:
     """
     ggcat build -k ${params.k} $fasta_file --min-multiplicity 1 -o "${fasta_file}_k${params.k}.unitigs"
-    ${params.rust} -k ${params.k} build -i "${fasta_file}_k${params.k}.unitigs" -o "${fasta_file}_k${params.k}.bin"
+    ${params.rust} build -k ${params.k} -i "${fasta_file}_k${params.k}.unitigs" -o "${fasta_file}_k${params.k}.bin"
     """
 }
 process encode_paths {
@@ -22,7 +22,7 @@ process encode_paths {
 
     script:
     """
-    ${params.rust} -k ${params.k} encode -i $fasta_file -g $bin_graph  -o "${fasta_file}.encoding" > "${fasta_file}.encoding.txt"
+    ${params.rust} encode -i $fasta_file -g $bin_graph  -o "${fasta_file}.encoding" > "${fasta_file}.encoding.txt"
     """
 }
 

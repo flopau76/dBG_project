@@ -204,7 +204,8 @@ impl BaseGraph {
     pub fn from_unitig_file(path: &Path, k: usize, stranded: bool) -> Self {
         // iterate over the unitigs and add them to the sequence set
         let mut sequences = SequenceSet::default();
-        let mut fasta_reader = parse_fastx_file(path).unwrap();
+        let mut fasta_reader = parse_fastx_file(path)
+            .expect(format!("Could not read unitigs from {}", path.display()).as_str());
         while let Some(record) = fasta_reader.next() {
             let record = record.unwrap();
             let seq = record.seq();
@@ -261,9 +262,6 @@ impl BaseGraph {
             self.k(),
             KS::capacity()
         );
-
-        // compute the edges
-        // TODO
 
         // compute the kmers
         let mut left_kmers = Vec::with_capacity(self.len());
@@ -329,6 +327,19 @@ impl BaseGraph {
             self.stranded,
             self.len(),
         );
+    }
+
+    /// Write the base graph to a binary file.
+    pub fn save_to_binary(&self, path: &Path) -> Result<(), Box<dyn Error>> {
+        self.store(path)?;
+        Ok(())
+    }
+
+    /// Load the graph from a binary file.
+    pub fn load_from_binary(path: &Path) -> Result<Self, Box<dyn Error>> {
+        let b = std::fs::read(&path)?;
+        let base = BaseGraph::deserialize_eps(&b)?;
+        Ok(base)
     }
 }
 
@@ -462,31 +473,5 @@ impl<KS: KmerStorage> Graph<KS> {
     pub fn from_seq_ascii<'a>(seq: &[u8], k: usize, stranded: bool) -> Self {
         let base = BaseGraph::from_seq_ascii(seq, k, stranded);
         base.finish()
-    }
-}
-
-// Dump and load from binary
-impl<KS: KmerStorage + Serialize + Deserialize> Graph<KS> {
-    /// Write the graph to a binary file.
-    pub fn save_to_binary(&self, path: &Path) -> Result<(), Box<dyn Error>> {
-        self.base.store(path)?;
-        Ok(())
-    }
-    /// Load the graph from a binary file.
-    pub fn load_from_binary(path: &Path) -> Result<Self, Box<dyn Error>> {
-        let b = std::fs::read(&path)?;
-        let base = BaseGraph::deserialize_eps(&b)?;
-        Ok(base.finish())
-    }
-    /// Directly built a graph from a unitig file and store it to a binary file.
-    pub fn build_to_binary(
-        input: &Path,
-        output: &Path,
-        k: usize,
-        stranded: bool,
-    ) -> Result<(), Box<dyn Error>> {
-        let graph = BaseGraph::from_unitig_file(input, k, stranded);
-        graph.store(output)?;
-        Ok(())
     }
 }
