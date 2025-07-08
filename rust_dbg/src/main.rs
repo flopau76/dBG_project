@@ -1,8 +1,6 @@
 use rust_dbg::encoder::{Encoder, EncoderParams, Scaffold};
 use rust_dbg::BaseGraph;
 
-use needletail::parse_fastx_file;
-
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Write};
 use std::path::PathBuf;
@@ -156,9 +154,6 @@ impl Commands {
                 min_depth,
                 max_depth,
             } => {
-                let mut input_reader = parse_fastx_file(input).unwrap();
-                let mut output_writer = BufWriter::new(File::create(output).unwrap());
-
                 let encoder_params = EncoderParams {
                     min_nb_repeats: *min_rep as u16,
                     min_sp_length: *min_depth,
@@ -173,21 +168,7 @@ impl Commands {
                         params: encoder_params,
                         graph: &graph,
                     };
-
-                    while let Some(record) = input_reader.next() {
-                        let record = record.unwrap();
-                        let id = unsafe { String::from_utf8_unchecked(record.id().to_owned()) };
-                        let seq = record.seq();
-                        eprintln!("Encoding record {}", id);
-                        println!(">{}", id);
-                        let scaffold = encoder.encode_record(id, &seq).unwrap();
-                        bincode::encode_into_std_write(
-                            scaffold,
-                            &mut output_writer,
-                            bincode::config::standard(),
-                        )
-                        .unwrap();
-                    }
+                    encoder.encode_file(input, output).unwrap();
                 });
             }
             Commands::Decode {

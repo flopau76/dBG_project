@@ -1,7 +1,9 @@
 use std::collections::VecDeque;
+use std::error::Error;
 use std::fmt::Debug;
 use std::iter::Sum;
 use std::ops::Add;
+use std::path::Path;
 
 use bincode::{Decode, Encode};
 use needletail::Sequence;
@@ -289,6 +291,27 @@ pub struct Encoder<'a, K: KmerStorage> {
 }
 
 impl<'a, K: KmerStorage> Encoder<'a, K> {
+    /// Encode all records present in a fasta file
+    pub fn encode_file(&self, input: &Path, output: &Path) -> Result<(), Box<dyn Error>> {
+        let mut input_reader = needletail::parse_fastx_file(input)?;
+        let mut output_writer = std::io::BufWriter::new(std::fs::File::create(output)?);
+
+        while let Some(record) = input_reader.next() {
+            let record = record?;
+            let id = unsafe { String::from_utf8_unchecked(record.id().to_owned()) };
+            let seq = record.seq();
+            eprintln!("Encoding record {}", id);
+            println!(">{}", id);
+            let scaffold = self.encode_record(id, &seq)?;
+            bincode::encode_into_std_write(
+                scaffold,
+                &mut output_writer,
+                bincode::config::standard(),
+            )?;
+        }
+        Ok(())
+    }
+
     /// Encode a scaffold from a sequence (containing non ACGT bases).
     pub fn encode_record(&self, id: String, seq: &[u8]) -> Result<Scaffold, PathwayError> {
         let mut contigs = Vec::new();
