@@ -200,7 +200,7 @@ impl Commands {
                         )
                     {
                         eprintln!("Decoding scaffold: {}", scaffold.id);
-                        let seq = scaffold.to_seq(&graph);
+                        let seq = scaffold.get_seq(&graph);
                         output_writer.write_all(b">").unwrap();
                         output_writer.write_all(scaffold.id.as_bytes()).unwrap();
                         output_writer.write_all(b"\n").unwrap();

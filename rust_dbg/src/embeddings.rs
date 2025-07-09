@@ -37,7 +37,7 @@ pub trait Pathway: Sized {
 /// A way to embedd any sequence into a graph, as a combination of pathways.
 pub trait Embedding<P: Pathway>: Sized {
     /// Retrieve the embeddded sequence.
-    fn to_seq(&self, graph: &Graph<impl KmerStorage>) -> Vec<u8>;
+    fn get_seq(&self, graph: &Graph<impl KmerStorage>) -> Vec<u8>;
 
     /// Embedd a sequence into a graph.
     fn from_seq(
@@ -51,7 +51,7 @@ pub trait Embedding<P: Pathway>: Sized {
 }
 
 impl<P: Pathway> Embedding<P> for P {
-    fn to_seq(&self, graph: &Graph<impl KmerStorage>) -> Vec<u8> {
+    fn get_seq(&self, graph: &Graph<impl KmerStorage>) -> Vec<u8> {
         let nodes = self.decode(graph);
         graph.path_seq(&nodes)
     }
@@ -240,8 +240,8 @@ pub struct Contig<P: Pathway> {
 }
 
 impl<P: Pathway> Embedding<P> for Contig<P> {
-    fn to_seq(&self, graph: &Graph<impl KmerStorage>) -> Vec<u8> {
-        let seq = self.nodes.to_seq(graph);
+    fn get_seq(&self, graph: &Graph<impl KmerStorage>) -> Vec<u8> {
+        let seq = self.nodes.get_seq(graph);
         seq[self.start_offset..seq.len() - self.end_offset].to_owned()
     }
 
@@ -282,7 +282,7 @@ pub struct Scaffold<P: Pathway> {
 }
 
 impl<P: Pathway> Embedding<P> for Scaffold<P> {
-    fn to_seq(&self, graph: &Graph<impl KmerStorage>) -> Vec<u8> {
+    fn get_seq(&self, graph: &Graph<impl KmerStorage>) -> Vec<u8> {
         assert_eq!(
             self.contigs.len() + 1,
             self.gaps.len(),
@@ -292,7 +292,7 @@ impl<P: Pathway> Embedding<P> for Scaffold<P> {
         );
         let mut seq = vec![b'N'; self.gaps[0]];
         for (contig, gap) in self.contigs.iter().zip(&self.gaps[1..]) {
-            seq.extend(&contig.to_seq(graph));
+            seq.extend(&contig.get_seq(graph));
             seq.extend(std::iter::repeat(b'N').take(*gap));
         }
         seq
