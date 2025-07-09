@@ -13,5 +13,7 @@ bincode = { version = "2" }
 vint64 = "1"
 clap = { version = "4", features = ["derive"] }
 
+textplots = "0.8"
+
 [dev-dependencies]
 rand = "0.9"

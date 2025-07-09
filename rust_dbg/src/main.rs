@@ -1,4 +1,4 @@
-use rust_dbg::encoder::{Encoder, GreedyEncoder};
+use rust_dbg::encoder::{Encoder, GnomeEncoder, GreedyEncoder};
 use rust_dbg::BaseGraph;
 
 use std::path::PathBuf;
@@ -158,6 +158,7 @@ impl Commands {
                     max_sp_length: *max_depth,
                     max_offset: 255,
                 };
+                let mut encoder = GnomeEncoder::default();
                 let base = BaseGraph::load_from_binary(&graph).unwrap();
                 run_with_ks!(base.k(), {
                     let graph = base.finish::<KS>();

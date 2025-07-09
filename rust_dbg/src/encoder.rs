@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Write};
 use std::path::Path;
@@ -10,7 +10,7 @@ use crate::embeddings::{
     Embedding, Extension, Pathway, PathwayStats, Scaffold, VecExtensions, VecNodes,
 };
 use crate::graph::shortest_path;
-use crate::{Graph, KmerStorage};
+use crate::{Graph, KmerStorage, Node};
 
 //####################################################################################
 //                                 Greedy Encoder                                   //
@@ -20,7 +20,7 @@ pub trait Encoder<P: Pathway>: Sized {
     /// Transform a list of nodes into any type of encoding
     fn encode_path(&self, nodes: VecNodes, graph: &Graph<impl KmerStorage>) -> P;
 
-    /// Encode a FASTA file into a binary format using the provided graph.
+    /// Encode a fasta file into a binary format using the provided graph.
     fn encode_from_fasta(
         &self,
         input: &Path,
@@ -30,7 +30,6 @@ pub trait Encoder<P: Pathway>: Sized {
     where
         P: Encode,
     {
-        // Default implementation can be overridden
         let mut input_reader = needletail::parse_fastx_file(input)?;
         let mut output_writer = BufWriter::new(File::create(output)?);
 
@@ -100,7 +99,16 @@ pub trait Encoder<P: Pathway>: Sized {
     }
 }
 
-/// Greedy encoder, transforming a list of nodes into some extensions based on specific cutoffs.
+/// Basic encoder, which transforms a list of nodes into a sequence of extensions.
+#[derive(Default)]
+pub struct BasicEncoder;
+impl Encoder<VecNodes> for BasicEncoder {
+    fn encode_path(&self, nodes: VecNodes, _graph: &Graph<impl KmerStorage>) -> VecNodes {
+        nodes
+    }
+}
+
+/// Greedy encoder, which transforms a list of nodes into some extensions based on specific cutoffs.
 pub struct GreedyEncoder {
     pub min_sp_length: usize,
     pub max_sp_length: usize,
@@ -219,14 +227,77 @@ impl Encoder<VecExtensions> for GreedyEncoder {
 //                                   G-node-mer                                     //
 //####################################################################################
 
-#[allow(dead_code)]
-struct GNoMe {
-    dict: HashMap<Vec<usize>, usize>,
+use textplots::{Chart, Plot, Shape};
+
+pub struct GnomeEncoder {
+    g: usize,
+    dict: HashMap<Vec<Node>, Vec<(usize, usize, usize)>>,
+    is_init: bool,
 }
 
-#[allow(dead_code)]
-impl GNoMe {
-    fn encode_fasta(&self, input: &Path, output: &Path) -> Result<(), Box<dyn std::error::Error>> {
-        todo!()
+impl Default for GnomeEncoder {
+    fn default() -> Self {
+        GnomeEncoder {
+            g: 10,
+            dict: HashMap::new(),
+            is_init: false,
+        }
+    }
+}
+
+impl GnomeEncoder {
+    pub fn encode_from_fasta(
+        &mut self,
+        input: &Path,
+        output: &Path,
+        graph: &Graph<impl KmerStorage>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut input_reader = needletail::parse_fastx_file(input)?;
+        // let mut output_writer = BufWriter::new(File::create(output)?);
+
+        // Create a dictionary containing all g-node-mers from the fasta
+        let mut i = 0;
+        while let Some(record) = input_reader.next() {
+            let record = record?;
+            let id = unsafe { String::from_utf8_unchecked(record.id().to_owned()) };
+            let seq = record.seq();
+            eprintln!("Encoding record {}", id);
+            println!(">{}", id);
+            let scaffold = Scaffold::from_seq(&seq, graph, &BasicEncoder::default())?;
+            for (j, contig) in scaffold.contigs.iter().enumerate() {
+                let gnome_iter = contig.nodes.windows(self.g);
+                for (k, gnome) in gnome_iter.enumerate() {
+                    self.dict
+                        .entry(gnome.to_vec())
+                        .or_insert_with(Vec::new)
+                        .push((i, j, k));
+                }
+            }
+            i += 1;
+        }
+        // inspect the dictionary
+        let data: BTreeMap<usize, u32> = self.dict.values().fold(BTreeMap::new(), |mut acc, v| {
+            *acc.entry(v.len()).or_insert(0) += 1;
+            acc
+        });
+        for (k, v) in &data {
+            println!("{}: {}", k, v);
+        }
+        let data = data
+            .into_iter()
+            .map(|(k, v)| (k as f32, v as f32))
+            .collect::<Vec<_>>();
+        let max = data.iter().map(|(_, v)| *v).fold(0.0, f32::max);
+        let histo = textplots::utils::histogram(&data, 0.0, max, 20);
+        println!("\ny = histogram bars");
+        Chart::new(180, 60, 6.0, 14.0)
+            .lineplot(&Shape::Bars(&histo))
+            .nice();
+        println!("\ny = bars");
+        Chart::new(180, 60, 0.0, 100.0)
+            .lineplot(&Shape::Bars(&data))
+            .display();
+
+        Ok(())
     }
 }
