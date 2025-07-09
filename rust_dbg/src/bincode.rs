@@ -1,3 +1,6 @@
+//! To serialize and deserialize the `Node` and `VecExtensions` types using the bincode library.
+//! The serialization of `Scaffold` and `Contig` is then derived automatically from these implementations.
+
 use crate::embeddings::{Extension, VecExtensions};
 use crate::Node;
 

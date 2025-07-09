@@ -1,4 +1,5 @@
-use rust_dbg::encoder::{Encoder, EncoderParams, Scaffold};
+use rust_dbg::embeddings::{Embedding, PathwayStats, Scaffold, VecExtensions};
+use rust_dbg::encoder::GreedyEncoder;
 use rust_dbg::BaseGraph;
 
 use std::fs::File;
@@ -154,21 +155,32 @@ impl Commands {
                 min_depth,
                 max_depth,
             } => {
-                let encoder_params = EncoderParams {
+                let mut input_reader = needletail::parse_fastx_file(input).unwrap();
+                let mut output_writer = BufWriter::new(File::create(output).unwrap());
+                let encoder = GreedyEncoder {
                     min_nb_repeats: *min_rep as u16,
                     min_sp_length: *min_depth,
                     max_sp_length: *max_depth,
                     max_offset: 255,
                 };
-
                 let base = BaseGraph::load_from_binary(&graph).unwrap();
                 run_with_ks!(base.k(), {
                     let graph = base.finish::<KS>();
-                    let encoder = Encoder {
-                        params: encoder_params,
-                        graph: &graph,
-                    };
-                    encoder.encode_file(input, output).unwrap();
+                    while let Some(record) = input_reader.next() {
+                        let record = record.unwrap();
+                        let id = unsafe { String::from_utf8_unchecked(record.id().to_owned()) };
+                        let seq = record.seq();
+                        eprintln!("Encoding record {}", id);
+                        println!(">{}", id);
+                        let mut scaffold = Scaffold::from_seq(&seq, &graph, &encoder).unwrap();
+                        scaffold.id = id;
+                        bincode::encode_into_std_write(
+                            scaffold,
+                            &mut output_writer,
+                            bincode::config::standard(),
+                        )
+                        .unwrap();
+                    }
                 });
             }
             Commands::Decode {
@@ -178,20 +190,22 @@ impl Commands {
             } => {
                 let mut input_reader = BufReader::new(File::open(input).unwrap());
                 let mut output_writer = BufWriter::new(File::create(output).unwrap());
-
                 let base = BaseGraph::load_from_binary(&graph).unwrap();
                 run_with_ks!(base.k(), {
                     let graph = base.finish::<KS>();
-                    while let Ok(scaffold) = bincode::decode_from_std_read::<Scaffold, _, _>(
-                        &mut input_reader,
-                        bincode::config::standard(),
-                    ) {
-                        let header = format!(">{}\n", scaffold.id);
-                        let seq = scaffold.sequence(&graph);
-                        output_writer.write_all(header.as_bytes()).unwrap();
-                        output_writer.write_all(seq.as_bytes()).unwrap();
+                    while let Ok(scaffold) =
+                        bincode::decode_from_std_read::<Scaffold<VecExtensions>, _, _>(
+                            &mut input_reader,
+                            bincode::config::standard(),
+                        )
+                    {
+                        eprintln!("Decoding scaffold: {}", scaffold.id);
+                        let seq = scaffold.to_seq(&graph);
+                        output_writer.write_all(b">").unwrap();
+                        output_writer.write_all(scaffold.id.as_bytes()).unwrap();
                         output_writer.write_all(b"\n").unwrap();
-                        eprintln!("Decoded scaffold: {}", scaffold.id);
+                        output_writer.write_all(&seq).unwrap();
+                        output_writer.write_all(b"\n").unwrap();
                     }
                     eprintln!(
                         "Decoding completed. Output written to: {}",
@@ -201,16 +215,19 @@ impl Commands {
             }
             Commands::StatsP { input, graph } => {
                 let mut input_reader = BufReader::new(File::open(input).unwrap());
-
                 let base = BaseGraph::load_from_binary(&graph).unwrap();
+                let mut stats = PathwayStats::default();
                 run_with_ks!(base.k(), {
                     let graph = base.finish::<KS>();
-                    while let Ok(scaffold) = bincode::decode_from_std_read::<Scaffold, _, _>(
-                        &mut input_reader,
-                        bincode::config::standard(),
-                    ) {
-                        scaffold.print_stats(&graph);
+                    while let Ok(scaffold) =
+                        bincode::decode_from_std_read::<Scaffold<VecExtensions>, _, _>(
+                            &mut input_reader,
+                            bincode::config::standard(),
+                        )
+                    {
+                        stats += scaffold.get_stats(&graph);
                     }
+                    stats.print();
                 });
             }
         }

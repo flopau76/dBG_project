@@ -1,32 +1,83 @@
+//! Embedds various dna sequence into a graph, from the simple path to the scaffold with gaps.
+
 use std::fmt::Debug;
 use std::iter::Sum;
-use std::ops::{Add, Deref, DerefMut};
+use std::ops::{Add, AddAssign, Deref, DerefMut};
 
 use bincode::{Decode, Encode};
 use needletail::Sequence;
 use packed_seq::{PackedSeqVec, SeqVec};
 
+use crate::encoder::Encoder;
 use crate::graph::shortest_path;
 use crate::{Graph, KmerStorage, Node, NodeIterator, PathwayError, Side};
 
 //####################################################################################
-//                                  Pathway                                         //
+//                           traits Pathway & Embedding                             //
 //####################################################################################
 
+/// A way to represent a continuous suite of nodes in a graph.
 pub trait Pathway: Sized {
-    /// Get the suite of nodes representing the path.
-    fn nodes(&self, graph: &Graph<impl KmerStorage>) -> Vec<Node>;
+    /// Decode the pathway into a suite of nodes.
+    fn decode(&self, graph: &Graph<impl KmerStorage>) -> VecNodes;
 
-    /// Get the sequence of the path.
-    fn sequence(&self, graph: &Graph<impl KmerStorage>) -> String {
-        let nodes = self.nodes(graph);
-        unsafe { String::from_utf8_unchecked(graph.path_seq(&nodes)) }
+    /// Encode a pathway from a suite of nodes.
+    fn encode(
+        nodes: VecNodes,
+        graph: &Graph<impl KmerStorage>,
+        encoder: &impl Encoder<Self>,
+    ) -> Self {
+        encoder.encode_path(nodes, graph)
     }
 
-    // Get some statistics
+    /// Get some statistics.
+    fn get_stats_p(&self, graph: &Graph<impl KmerStorage>) -> PathwayStats;
+}
+
+/// A way to embedd any sequence into a graph, as a combination of pathways.
+pub trait Embedding<P: Pathway>: Sized {
+    /// Retrieve the embeddded sequence.
+    fn to_seq(&self, graph: &Graph<impl KmerStorage>) -> Vec<u8>;
+
+    /// Embedd a sequence into a graph.
+    fn from_seq(
+        seq: &[u8],
+        graph: &Graph<impl KmerStorage>,
+        encoder: &impl Encoder<P>,
+    ) -> Result<Self, PathwayError>;
+
+    // Get some statistics.
     fn get_stats(&self, graph: &Graph<impl KmerStorage>) -> PathwayStats;
 }
 
+impl<P: Pathway> Embedding<P> for P {
+    fn to_seq(&self, graph: &Graph<impl KmerStorage>) -> Vec<u8> {
+        let nodes = self.decode(graph);
+        graph.path_seq(&nodes)
+    }
+    fn from_seq(
+        seq: &[u8],
+        graph: &Graph<impl KmerStorage>,
+        encoder: &impl Encoder<P>,
+    ) -> Result<Self, PathwayError> {
+        let seq = PackedSeqVec::from_ascii(seq);
+        let mut iterator = NodeIterator::new(graph, seq)?;
+        let mut nodes = VecNodes::default();
+        while let Some(node) = iterator.next()? {
+            nodes.push(node);
+        }
+        Ok(encoder.encode_path(nodes, graph))
+    }
+    fn get_stats(&self, graph: &Graph<impl KmerStorage>) -> PathwayStats {
+        self.get_stats_p(graph)
+    }
+}
+
+//####################################################################################
+//                                  VecNodes                                        //
+//####################################################################################
+
+#[derive(Default)]
 pub struct VecNodes(pub Vec<Node>);
 impl Deref for VecNodes {
     type Target = Vec<Node>;
@@ -41,11 +92,10 @@ impl DerefMut for VecNodes {
 }
 
 impl Pathway for VecNodes {
-    fn nodes(&self, _graph: &Graph<impl KmerStorage>) -> Vec<Node> {
-        self.0.clone()
+    fn decode(&self, _graph: &Graph<impl KmerStorage>) -> VecNodes {
+        VecNodes(self.0.clone())
     }
-
-    fn get_stats(&self, _graph: &Graph<impl KmerStorage>) -> PathwayStats {
+    fn get_stats_p(&self, _graph: &Graph<impl KmerStorage>) -> PathwayStats {
         PathwayStats {
             nucleo_count: self.0.len() - 1,
             targets_count: 1,
@@ -57,109 +107,8 @@ impl Pathway for VecNodes {
     }
 }
 
-impl VecNodes {
-    pub fn from_seq(seq: &[u8], graph: &Graph<impl KmerStorage>) -> Result<Self, PathwayError> {
-        let seq = PackedSeqVec::from_ascii(seq);
-        let mut iterator = NodeIterator::new(graph, seq)?;
-        let mut nodes = Vec::new();
-        while let Some(node) = iterator.next()? {
-            nodes.push(node);
-        }
-        Ok(VecNodes(nodes))
-    }
-}
-
 //####################################################################################
-//                               PathwayStats                                       //
-//####################################################################################
-
-pub struct PathwayStats {
-    nucleo_count: usize,
-    targets_count: usize,
-    reps_count: usize,
-    nucleo_nodes: usize,
-    targets_nodes: usize,
-    reps_nodes: usize,
-}
-
-impl Add for PathwayStats {
-    type Output = Self;
-
-    fn add(self, other: Self) -> Self {
-        PathwayStats {
-            nucleo_count: self.nucleo_count + other.nucleo_count,
-            targets_count: self.targets_count + other.targets_count,
-            reps_count: self.reps_count + other.reps_count,
-            nucleo_nodes: self.nucleo_nodes + other.nucleo_nodes,
-            targets_nodes: self.targets_nodes + other.targets_nodes,
-            reps_nodes: self.reps_nodes + other.reps_nodes,
-        }
-    }
-}
-
-impl Sum for PathwayStats {
-    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
-        iter.fold(
-            PathwayStats {
-                nucleo_count: 0,
-                targets_count: 0,
-                reps_count: 0,
-                nucleo_nodes: 0,
-                targets_nodes: 0,
-                reps_nodes: 0,
-            },
-            |acc, x| acc + x,
-        )
-    }
-}
-
-/// Format a long integer with commas
-fn format_int(n: usize) -> String {
-    let s = n.to_string();
-    let mut result = String::new();
-    let mut chars = s.chars().rev().peekable();
-
-    while let Some(c) = chars.next() {
-        result.push(c);
-        if chars.peek().is_some() && result.len() % 4 == 3 {
-            result.push(',');
-        }
-    }
-
-    result.chars().rev().collect()
-}
-
-impl PathwayStats {
-    pub fn print(&self) {
-        let total_count = self.nucleo_count + self.targets_count + self.reps_count;
-        let total_nodes = self.nucleo_nodes + self.targets_nodes + self.reps_nodes;
-
-        eprintln!("       Method | Number of extensions | Number of encoded nodes ");
-        eprintln!("--------------|-------------------------|-----------------");
-        for (name, count, nodes) in [
-            ("Next node", self.nucleo_count, self.nucleo_nodes),
-            ("Target node", self.targets_count, self.targets_nodes),
-            ("Repetition", self.reps_count, self.reps_nodes),
-        ] {
-            eprintln!(
-                "{:>13} | {:>14}  ({:>4.1}%) | {:>11} bits ({:>4.1}%)",
-                name,
-                format_int(count),
-                count as f64 / total_count as f64 * 100.0,
-                format_int(nodes),
-                nodes as f64 / total_nodes as f64 * 100.0,
-            );
-        }
-        eprintln!(
-            "        Total | {:>14}          | {:>11} bits",
-            format_int(total_count),
-            format_int(total_nodes),
-        );
-    }
-}
-
-//####################################################################################
-//                        Extension  &  Vec<Extension>                              //
+//                                  VecExtensions                                   //
 //####################################################################################
 
 /// An enum containing different ways to encode a path extension.
@@ -196,7 +145,7 @@ impl DerefMut for VecExtensions {
 }
 
 impl Pathway for VecExtensions {
-    fn nodes(&self, graph: &Graph<impl KmerStorage>) -> Vec<Node> {
+    fn decode(&self, graph: &Graph<impl KmerStorage>) -> VecNodes {
         let mut nodes = Vec::new();
 
         match self.first() {
@@ -243,10 +192,10 @@ impl Pathway for VecExtensions {
                 }
             }
         }
-        nodes
+        VecNodes(nodes)
     }
 
-    fn get_stats(&self, graph: &Graph<impl KmerStorage>) -> PathwayStats {
+    fn get_stats_p(&self, graph: &Graph<impl KmerStorage>) -> PathwayStats {
         let mut nucleo_count = 0;
         let mut targets_count = 0;
         let mut reps_count = 0;
@@ -265,7 +214,7 @@ impl Pathway for VecExtensions {
             }
         }
 
-        let total_nodes = self.nodes(graph).len();
+        let total_nodes = self.decode(graph).len();
 
         PathwayStats {
             nucleo_count,
@@ -279,45 +228,50 @@ impl Pathway for VecExtensions {
 }
 
 //####################################################################################
-//                             Contig  &  Scaffold                                  //
+//                                   Contig                                         //
 //####################################################################################
 
-/// Contig in a de Bruijn graph, represented as a suite of nodes
+/// Contig in a de Bruijn graph, represented as a pathway of nodes with start and end offsets.
 #[derive(Encode, Decode, Debug, Clone)]
 pub struct Contig<P: Pathway> {
-    pub nodes_encoding: P,
+    pub nodes: P,
     pub start_offset: usize,
     pub end_offset: usize,
 }
 
-impl<P: Pathway> Contig<P> {
-    /// Returns the sequence of the contig
-    pub fn sequence(&self, graph: &Graph<impl KmerStorage>) -> String {
-        let seq = self.nodes_encoding.sequence(graph);
-        seq[self.start_offset..seq.len() - self.end_offset].to_string()
+impl<P: Pathway> Embedding<P> for Contig<P> {
+    fn to_seq(&self, graph: &Graph<impl KmerStorage>) -> Vec<u8> {
+        let seq = self.nodes.to_seq(graph);
+        seq[self.start_offset..seq.len() - self.end_offset].to_owned()
     }
-    /// Get statistics about the underlying node encoding
-    pub fn get_stats(&self, graph: &Graph<impl KmerStorage>) -> PathwayStats {
-        self.nodes_encoding.get_stats(graph)
-    }
-}
 
-impl Contig<VecNodes> {
-    /// Encode a contig from a sequence (containing only ACGT bases).
-    pub fn from_seq(seq: &[u8], graph: &Graph<impl KmerStorage>) -> Result<Self, PathwayError> {
+    fn from_seq(
+        seq: &[u8],
+        graph: &Graph<impl KmerStorage>,
+        encoder: &impl Encoder<P>,
+    ) -> Result<Self, PathwayError> {
         let seq = PackedSeqVec::from_ascii(seq);
         let mut iterator = NodeIterator::new(graph, seq)?;
-        let mut nodes = Vec::new();
+        let mut nodes = VecNodes::default();
         while let Some(node) = iterator.next()? {
             nodes.push(node);
         }
+        let nodes = encoder.encode_path(nodes, graph);
         Ok(Contig {
-            nodes_encoding: VecNodes(nodes),
+            nodes,
             start_offset: iterator.start_offset.expect("Start offset should be set"),
             end_offset: iterator.end_offset.expect("End offset should be set"),
         })
     }
+
+    fn get_stats(&self, graph: &Graph<impl KmerStorage>) -> PathwayStats {
+        self.nodes.get_stats(graph)
+    }
 }
+
+//####################################################################################
+//                                  Scaffold                                        //
+//####################################################################################
 
 /// Scaffold in a de Bruijn graph, represented as an alternance of contigs and gaps of a given size.
 #[derive(Encode, Decode, Debug, Clone)]
@@ -327,43 +281,27 @@ pub struct Scaffold<P: Pathway> {
     pub gaps: Vec<usize>,
 }
 
-impl<P: Pathway> Scaffold<P> {
-    /// Returns the sequence of the scaffold
-    pub fn sequence(&self, graph: &Graph<impl KmerStorage>) -> String {
+impl<P: Pathway> Embedding<P> for Scaffold<P> {
+    fn to_seq(&self, graph: &Graph<impl KmerStorage>) -> Vec<u8> {
         assert_eq!(
             self.contigs.len() + 1,
             self.gaps.len(),
-            "Expected one mor gap than contigs, but got {} contigs and {} gaps",
+            "Expected one more gap than contigs, but got {} contigs and {} gaps",
             self.contigs.len(),
             self.gaps.len()
         );
-        let mut seq = "N".repeat(self.gaps[0]);
-        for (contig, gap) in std::iter::zip(&self.contigs, &self.gaps[1..]) {
-            seq.push_str(&contig.sequence(graph));
-            seq.push_str(&"N".repeat(*gap));
+        let mut seq = vec![b'N'; self.gaps[0]];
+        for (contig, gap) in self.contigs.iter().zip(&self.gaps[1..]) {
+            seq.extend(&contig.to_seq(graph));
+            seq.extend(std::iter::repeat(b'N').take(*gap));
         }
         seq
     }
 
-    /// Prints statistics about the scaffold
-    pub fn print_stats(&self, graph: &Graph<impl KmerStorage>) {
-        println!(">{}", self.id);
-        let stats = self
-            .contigs
-            .iter()
-            .map(|c| c.get_stats(graph))
-            .sum::<PathwayStats>();
-        stats.print();
-        eprintln!();
-    }
-}
-
-impl Scaffold<VecNodes> {
-    /// Encode a scaffold from a sequence (containing non ACGT bases).
-    pub fn from_seq(
-        id: String,
+    fn from_seq(
         seq: &[u8],
         graph: &Graph<impl KmerStorage>,
+        encoder: &impl Encoder<P>,
     ) -> Result<Self, PathwayError> {
         let mut contigs = Vec::new();
         let mut gaps = Vec::new();
@@ -374,12 +312,108 @@ impl Scaffold<VecNodes> {
                 continue;
             };
             gaps.push(gap_size);
-            let contig = Contig::from_seq(contig, graph)?;
+            let contig = Contig::from_seq(contig, graph, encoder)?;
             contigs.push(contig);
             gap_size = 0;
         }
         gaps.push(gap_size);
 
-        Ok(Scaffold { id, contigs, gaps })
+        Ok(Scaffold {
+            id: String::default(),
+            contigs,
+            gaps,
+        })
+    }
+
+    fn get_stats(&self, graph: &Graph<impl KmerStorage>) -> PathwayStats {
+        self.contigs
+            .iter()
+            .map(|c| c.get_stats(graph))
+            .sum::<PathwayStats>()
+    }
+}
+
+//####################################################################################
+//                               PathwayStats                                       //
+//####################################################################################
+
+#[derive(Default, Copy, Clone)]
+pub struct PathwayStats {
+    nucleo_count: usize,
+    targets_count: usize,
+    reps_count: usize,
+    nucleo_nodes: usize,
+    targets_nodes: usize,
+    reps_nodes: usize,
+}
+
+impl AddAssign for PathwayStats {
+    fn add_assign(&mut self, other: Self) {
+        self.nucleo_count += other.nucleo_count;
+        self.targets_count += other.targets_count;
+        self.reps_count += other.reps_count;
+        self.nucleo_nodes += other.nucleo_nodes;
+        self.targets_nodes += other.targets_nodes;
+        self.reps_nodes += other.reps_nodes;
+    }
+}
+
+impl Add for PathwayStats {
+    type Output = Self;
+
+    fn add(mut self, other: Self) -> Self {
+        self += other;
+        self
+    }
+}
+
+impl Sum for PathwayStats {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        iter.fold(PathwayStats::default(), |acc, x| acc + x)
+    }
+}
+
+/// Format a long integer with commas
+fn format_int(n: usize) -> String {
+    let s = n.to_string();
+    let mut result = String::new();
+    let mut chars = s.chars().rev().peekable();
+
+    while let Some(c) = chars.next() {
+        result.push(c);
+        if chars.peek().is_some() && result.len() % 4 == 3 {
+            result.push(',');
+        }
+    }
+
+    result.chars().rev().collect()
+}
+
+impl PathwayStats {
+    pub fn print(&self) {
+        let total_count = self.nucleo_count + self.targets_count + self.reps_count;
+        let total_nodes = self.nucleo_nodes + self.targets_nodes + self.reps_nodes;
+
+        eprintln!("       Method | Number of extensions | Number of encoded nodes ");
+        eprintln!("--------------|-------------------------|-----------------");
+        for (name, count, nodes) in [
+            ("Next node", self.nucleo_count, self.nucleo_nodes),
+            ("Target node", self.targets_count, self.targets_nodes),
+            ("Repetition", self.reps_count, self.reps_nodes),
+        ] {
+            eprintln!(
+                "{:>13} | {:>14}  ({:>4.1}%) | {:>11} bits ({:>4.1}%)",
+                name,
+                format_int(count),
+                count as f64 / total_count as f64 * 100.0,
+                format_int(nodes),
+                nodes as f64 / total_nodes as f64 * 100.0,
+            );
+        }
+        eprintln!(
+            "        Total | {:>14}          | {:>11} bits",
+            format_int(total_count),
+            format_int(total_nodes),
+        );
     }
 }

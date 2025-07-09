@@ -1,4 +1,4 @@
-use rust_dbg::encoder::{Encoder, EncoderParams, Extension, ExtensionVec};
+use rust_dbg::encoder::GreedyEncoder;
 use rust_dbg::graph::SequenceSet;
 use rust_dbg::{BaseGraph, Graph, Node, NodeIterator};
 
@@ -37,7 +37,7 @@ fn easy_seq_encoding() {
     for stranded in [true, false] {
         let (seq, graph) = make_compacted_graph(stranded);
 
-        let encoder_params = EncoderParams {
+        let encoder_params = GreedyEncoder {
             min_nb_repeats: 10 as u16,
             min_sp_length: 1,
             max_sp_length: 50,
@@ -48,7 +48,7 @@ fn easy_seq_encoding() {
             graph: &graph,
         };
 
-        let path_in: Vec<Node> = NodeIterator::new(&graph, seq.clone()).unwrap().collect();
+        let path_in = VecNodes::from_seq(seq, graph)
         let encoding = encoder.encode_path(&path_in);
         let path_out = encoding.decode(&graph);
 
@@ -64,7 +64,7 @@ fn random_seq_encoding() {
     let base = BaseGraph::from_seq(&seq, 5, false);
     let graph: Graph<u32> = base.finish();
 
-    let encoder_params = EncoderParams {
+    let encoder_params = GreedyEncoder {
         min_nb_repeats: 500 as u16,
         min_sp_length: 1,
         max_sp_length: 50,
@@ -128,7 +128,7 @@ fn random_serialize() {
     let base = BaseGraph::from_seq(&seq, 5, false);
     let graph: Graph<u32> = base.finish();
 
-    let encoder_params = EncoderParams {
+    let encoder_params = GreedyEncoder {
         min_nb_repeats: 500 as u16,
         min_sp_length: 1,
         max_sp_length: 50,
