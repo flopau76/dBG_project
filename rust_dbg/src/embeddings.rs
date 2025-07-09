@@ -17,7 +17,7 @@ use crate::{Graph, KmerStorage, Node, NodeIterator, PathwayError, Side};
 //####################################################################################
 
 /// A way to represent a continuous suite of nodes in a graph.
-pub trait Pathway: Sized {
+pub trait Pathway: Sized + Debug {
     /// Decode the pathway into a suite of nodes.
     fn decode(&self, graph: &Graph<impl KmerStorage>) -> VecNodes;
 
@@ -77,7 +77,7 @@ impl<P: Pathway> Embedding<P> for P {
 //                                  VecNodes                                        //
 //####################################################################################
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct VecNodes(pub Vec<Node>);
 impl Deref for VecNodes {
     type Target = Vec<Node>;
@@ -131,6 +131,7 @@ impl Debug for Extension {
     }
 }
 
+#[derive(Default, Debug)]
 pub struct VecExtensions(pub Vec<Extension>);
 impl Deref for VecExtensions {
     type Target = Vec<Extension>;

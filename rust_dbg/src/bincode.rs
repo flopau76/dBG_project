@@ -77,7 +77,7 @@ fn group_extensions(extensions: &Vec<Extension>) -> Vec<Vec<Extension>> {
     let mut result = Vec::new();
 
     let mut current_group = Vec::with_capacity(64);
-    let mut current_discriminant = std::mem::discriminant(&current_group[0]);
+    let mut current_discriminant = std::mem::discriminant(&extensions[0]);
 
     for ext in extensions {
         let next_discriminant = std::mem::discriminant(ext);
@@ -91,7 +91,10 @@ fn group_extensions(extensions: &Vec<Extension>) -> Vec<Vec<Extension>> {
         }
     }
 
-    result.push(current_group);
+    if !current_group.is_empty() {
+        result.push(current_group);
+    }
+
     result
 }
 

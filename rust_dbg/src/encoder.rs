@@ -1,18 +1,103 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
+use std::fs::File;
+use std::io::{BufReader, BufWriter, Write};
+use std::path::Path;
 
+use bincode::{Decode, Encode};
 use packed_seq::Seq;
 
-use crate::embeddings::{Extension, Pathway, VecExtensions, VecNodes};
+use crate::embeddings::{
+    Embedding, Extension, Pathway, PathwayStats, Scaffold, VecExtensions, VecNodes,
+};
 use crate::graph::shortest_path;
 use crate::{Graph, KmerStorage};
 
 //####################################################################################
-//                                 Encoder                                          //
+//                                 Greedy Encoder                                   //
 //####################################################################################
 
-pub trait Encoder<P: Pathway> {
-    // transform a list of nodes into any type of encoding
+pub trait Encoder<P: Pathway>: Sized {
+    /// Transform a list of nodes into any type of encoding
     fn encode_path(&self, nodes: VecNodes, graph: &Graph<impl KmerStorage>) -> P;
+
+    /// Encode a FASTA file into a binary format using the provided graph.
+    fn encode_from_fasta(
+        &self,
+        input: &Path,
+        output: &Path,
+        graph: &Graph<impl KmerStorage>,
+    ) -> Result<(), Box<dyn std::error::Error>>
+    where
+        P: Encode,
+    {
+        // Default implementation can be overridden
+        let mut input_reader = needletail::parse_fastx_file(input)?;
+        let mut output_writer = BufWriter::new(File::create(output)?);
+
+        while let Some(record) = input_reader.next() {
+            let record = record?;
+            let id = unsafe { String::from_utf8_unchecked(record.id().to_owned()) };
+            let seq = record.seq();
+            eprintln!("Encoding record {}", id);
+            println!(">{}", id);
+            let mut scaffold = Scaffold::from_seq(&seq, graph, self)?;
+            scaffold.id = id;
+            bincode::encode_into_std_write(
+                scaffold,
+                &mut output_writer,
+                bincode::config::standard(),
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Decode a binary file into a fasta format using the provided graph.
+    fn decode_to_fasta(
+        &self,
+        input: &Path,
+        output: &Path,
+        graph: &Graph<impl KmerStorage>,
+    ) -> Result<(), Box<dyn std::error::Error>>
+    where
+        P: Decode<()>,
+    {
+        let mut input_reader = BufReader::new(File::open(input)?);
+        let mut output_writer = BufWriter::new(File::create(output)?);
+
+        while let Ok(scaffold) = bincode::decode_from_std_read::<Scaffold<VecExtensions>, _, _>(
+            &mut input_reader,
+            bincode::config::standard(),
+        ) {
+            eprintln!("Decoding scaffold: {}", scaffold.id);
+            let seq = scaffold.get_seq(graph);
+            output_writer.write_all(b">")?;
+            output_writer.write_all(scaffold.id.as_bytes())?;
+            output_writer.write_all(b"\n")?;
+            output_writer.write_all(&seq)?;
+            output_writer.write_all(b"\n")?;
+        }
+        Ok(())
+    }
+
+    /// Get some stats about the binary encoding.
+    fn print_stats(
+        &self,
+        input: &Path,
+        graph: &Graph<impl KmerStorage>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut input_reader = BufReader::new(File::open(input)?);
+
+        let mut stats = PathwayStats::default();
+        while let Ok(scaffold) = bincode::decode_from_std_read::<Scaffold<VecExtensions>, _, _>(
+            &mut input_reader,
+            bincode::config::standard(),
+        ) {
+            stats += scaffold.get_stats(&graph);
+        }
+        stats.print();
+
+        Ok(())
+    }
 }
 
 /// Greedy encoder, transforming a list of nodes into some extensions based on specific cutoffs.
@@ -101,6 +186,7 @@ impl Encoder<VecExtensions> for GreedyEncoder {
                 if length >= self.min_sp_length {
                     let ext = Extension::TargetNode(target_node);
                     extensions.push(ext);
+                    println!("{:?}", ext);
                 }
                 // otherwise, we encode its nodes directly (2 bits per node)
                 else {
@@ -108,9 +194,11 @@ impl Encoder<VecExtensions> for GreedyEncoder {
                         nodes[current_position + 1..current_position + 1 + length]
                             .iter()
                             .map(|&node| {
-                                Extension::NextNucleotide(
+                                let ext = Extension::NextNucleotide(
                                     graph.node_seq(node).as_slice().get(graph.k() - 1),
-                                )
+                                );
+                                println!("{:?}", ext);
+                                ext
                             }),
                     );
                 }
@@ -119,9 +207,26 @@ impl Encoder<VecExtensions> for GreedyEncoder {
             // add the repetition
             let ext = Extension::Repetition(rep.0, rep.1);
             extensions.push(ext);
+            println!("{:?}", ext);
             current_position += rep.0 as usize;
         }
         extensions.pop(); // remove the sentinel
         VecExtensions(extensions)
+    }
+}
+
+//####################################################################################
+//                                   G-node-mer                                     //
+//####################################################################################
+
+#[allow(dead_code)]
+struct GNoMe {
+    dict: HashMap<Vec<usize>, usize>,
+}
+
+#[allow(dead_code)]
+impl GNoMe {
+    fn encode_fasta(&self, input: &Path, output: &Path) -> Result<(), Box<dyn std::error::Error>> {
+        todo!()
     }
 }
