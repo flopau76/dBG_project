@@ -269,7 +269,8 @@ impl GnomeEncoder {
         // Write the g-node-mer dictionary to the output file
         writeln!(output_writer, "# input fasta: {}", input.display())?;
         writeln!(output_writer, "# g={}", self.g)?;
-        self.print_stats_gnomes(output)?;
+        self.print_stats_gnomes(&mut output_writer)?;
+        output_writer.flush()?;
 
         Ok(())
     }
@@ -309,7 +310,10 @@ impl GnomeEncoder {
         Ok(())
     }
 
-    fn print_stats_gnomes(&self, output: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    fn print_stats_gnomes(
+        &self,
+        output_writer: &mut BufWriter<File>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         // group occurences per haplotype
         let mut dict_haplo = self
             .dict
@@ -325,9 +329,15 @@ impl GnomeEncoder {
             .collect::<Vec<_>>();
 
         // sort by decreasing number of occurrences
-        dict_haplo.sort_by(|a, b| b.iter().sum::<u16>().cmp(&a.iter().sum::<u16>()));
+        dict_haplo.sort_by(|a, b| {
+            let sum_a: u16 = a.iter().sum();
+            let sum_b: u16 = b.iter().sum();
+            match sum_b.cmp(&sum_a) {
+                std::cmp::Ordering::Equal => a.cmp(b),
+                ord => ord,
+            }
+        });
 
-        let mut output_writer = BufWriter::new(File::create(output)?);
         writeln!(
             output_writer,
             "# Number of records: {}",
@@ -356,6 +366,7 @@ impl GnomeEncoder {
             }
             writeln!(output_writer)?;
         }
+
         Ok(())
     }
 }

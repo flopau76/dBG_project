@@ -69,8 +69,8 @@ workflow {
     out = concat_fasta(samples_list)
 
     build_graph(out.flatten())
-    encode_paths(build_graph.output.bin_graph)
+    // encode_paths(build_graph.output.bin_graph)
 
-    // g_size = channel.of( 4,5,6,8,10,12,14 )
-    // encode_paths_tests(build_graph.output.bin_graph.combine(g_size))
+    g_size = channel.of( 1,2,3,4,5,6,7,8,9,10,11,12,13,14,16,18,20 )
+    encode_paths_tests(build_graph.output.bin_graph.combine(g_size))
 }
