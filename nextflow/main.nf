@@ -25,16 +25,17 @@ process encode_paths {
     ${params.rust} encode -i $fasta_file -g $bin_graph  -o "${fasta_file}.encoding" > "${fasta_file}.encoding.txt"
     """
 }
+process encode_paths_tests {
+    publishDir ('data/gnome_stats', mode: 'move')
+    input:
+        tuple path(fasta_file), path(bin_graph), val(g_size)
+    output:
+        path "g${g_size}_${fasta_file}.gnome_stats"
 
-// Actual work of building the graph and encoding the paths
-// Input is a single fasta file containing multiple sequences
-workflow encoding {
-    take:
-    fasta_file
-
-    main:
-    build_graph(fasta_file)
-    encode_paths(build_graph.output.bin_graph)
+    script:
+    """
+    ${params.rust} encode-exp -i $fasta_file -g $bin_graph --gg $g_size -o "g${g_size}_${fasta_file}.gnome_stats"
+    """
 }
 
 process split_communities {
@@ -60,22 +61,16 @@ process concat_fasta {
     """
 }
 
-// Preprocessing step, which (if enabled) splits the input files into communities
-workflow preprocess {
-    take:
-    samples_list
-
-    main:
+workflow {
+    samples_list = params.input_files
     if (params.preprocess)
     out = split_communities(samples_list)
     else
     out = concat_fasta(samples_list)
 
-    emit:
-    out
-}
+    build_graph(out.flatten())
+    encode_paths(build_graph.output.bin_graph)
 
-workflow {
-    preprocess(params.input_files)
-    encoding(preprocess.out.flatten())
+    // g_size = channel.of( 4,5,6,8,10,12,14 )
+    // encode_paths_tests(build_graph.output.bin_graph.combine(g_size))
 }

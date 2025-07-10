@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Write};
 use std::path::Path;
@@ -227,11 +227,10 @@ impl Encoder<VecExtensions> for GreedyEncoder {
 //                                   G-node-mer                                     //
 //####################################################################################
 
-use textplots::{Chart, Plot, Shape};
-
 pub struct GnomeEncoder {
     g: usize,
     dict: HashMap<Vec<Node>, Vec<(usize, usize, usize)>>,
+    record_names: Vec<String>,
     is_init: bool,
 }
 
@@ -240,29 +239,60 @@ impl Default for GnomeEncoder {
         GnomeEncoder {
             g: 10,
             dict: HashMap::new(),
+            record_names: Vec::new(),
             is_init: false,
         }
     }
 }
 
 impl GnomeEncoder {
+    pub fn new(g: usize) -> Self {
+        GnomeEncoder {
+            g,
+            dict: HashMap::new(),
+            record_names: Vec::new(),
+            is_init: false,
+        }
+    }
+
     pub fn encode_from_fasta(
         &mut self,
         input: &Path,
         output: &Path,
         graph: &Graph<impl KmerStorage>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let mut input_reader = needletail::parse_fastx_file(input)?;
-        // let mut output_writer = BufWriter::new(File::create(output)?);
+        // let mut input_reader = needletail::parse_fastx_file(input)?;
+        let mut output_writer = BufWriter::new(File::create(output)?);
 
-        // Create a dictionary containing all g-node-mers from the fasta
+        self.init_from_fasta(input, graph)?;
+
+        // Write the g-node-mer dictionary to the output file
+        writeln!(output_writer, "# input fasta: {}", input.display())?;
+        writeln!(output_writer, "# g={}", self.g)?;
+        self.print_stats_gnomes(output)?;
+
+        Ok(())
+    }
+
+    /// Initialize the encoder from a fasta file, creating a dictionary of g-node-mers.
+    /// The dictionary maps g-node-mer sequences to their occurrences in the scaffolds.
+    /// Each entry in the dictionary is a vector of tuples (scaffold_index, contig_index, position_in_contig).
+    fn init_from_fasta(
+        &mut self,
+        input: &Path,
+        graph: &Graph<impl KmerStorage>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if self.is_init {
+            return Ok(());
+        }
+        let mut input_reader = needletail::parse_fastx_file(input)?;
+
         let mut i = 0;
         while let Some(record) = input_reader.next() {
             let record = record?;
             let id = unsafe { String::from_utf8_unchecked(record.id().to_owned()) };
+            self.record_names.push(id);
             let seq = record.seq();
-            eprintln!("Encoding record {}", id);
-            println!(">{}", id);
             let scaffold = Scaffold::from_seq(&seq, graph, &BasicEncoder::default())?;
             for (j, contig) in scaffold.contigs.iter().enumerate() {
                 let gnome_iter = contig.nodes.windows(self.g);
@@ -275,29 +305,57 @@ impl GnomeEncoder {
             }
             i += 1;
         }
-        // inspect the dictionary
-        let data: BTreeMap<usize, u32> = self.dict.values().fold(BTreeMap::new(), |mut acc, v| {
-            *acc.entry(v.len()).or_insert(0) += 1;
-            acc
-        });
-        for (k, v) in &data {
-            println!("{}: {}", k, v);
-        }
-        let data = data
-            .into_iter()
-            .map(|(k, v)| (k as f32, v as f32))
-            .collect::<Vec<_>>();
-        let max = data.iter().map(|(_, v)| *v).fold(0.0, f32::max);
-        let histo = textplots::utils::histogram(&data, 0.0, max, 20);
-        println!("\ny = histogram bars");
-        Chart::new(180, 60, 6.0, 14.0)
-            .lineplot(&Shape::Bars(&histo))
-            .nice();
-        println!("\ny = bars");
-        Chart::new(180, 60, 0.0, 100.0)
-            .lineplot(&Shape::Bars(&data))
-            .display();
+        self.is_init = true;
+        Ok(())
+    }
 
+    fn print_stats_gnomes(&self, output: &Path) -> Result<(), Box<dyn std::error::Error>> {
+        // group occurences per haplotype
+        let mut dict_haplo = self
+            .dict
+            .iter()
+            .map(|(_k, v)| {
+                let mut haplo_counts = vec![0 as u16; self.record_names.len()];
+                for (i, _j, _k) in v {
+                    // increment the count for the corresponding scaffold
+                    haplo_counts[*i] += 1;
+                }
+                haplo_counts
+            })
+            .collect::<Vec<_>>();
+
+        // sort by decreasing number of occurrences
+        dict_haplo.sort_by(|a, b| b.iter().sum::<u16>().cmp(&a.iter().sum::<u16>()));
+
+        let mut output_writer = BufWriter::new(File::create(output)?);
+        writeln!(
+            output_writer,
+            "# Number of records: {}",
+            self.record_names.len()
+        )?;
+        writeln!(
+            output_writer,
+            "# Number of different gnomes: {}",
+            self.dict.len()
+        )?;
+
+        for (i, name) in self.record_names.iter().enumerate() {
+            if i > 0 {
+                write!(output_writer, "\t")?;
+            }
+            write!(output_writer, "{}", name)?;
+        }
+        writeln!(output_writer)?;
+
+        for v in &dict_haplo {
+            for (i, count) in v.iter().enumerate() {
+                if i > 0 {
+                    write!(output_writer, "\t")?;
+                }
+                write!(output_writer, "{}", count)?;
+            }
+            writeln!(output_writer)?;
+        }
         Ok(())
     }
 }
