@@ -22,6 +22,9 @@ pub struct NodeIterator<'a, KS: KmerStorage> {
 
 impl<'a, KS: KmerStorage> NodeIterator<'a, KS> {
     pub fn new(graph: &'a Graph<KS>, seq: PackedSeqVec) -> Result<Self, PathwayError> {
+        if seq.len() < graph.k() {
+            panic!("sequence is shorter than kmer size");
+        }
         let mut node_iter = Self {
             graph,
             seq,
@@ -71,7 +74,6 @@ impl<'a, KS: KmerStorage> NodeIterator<'a, KS> {
             let node_seq = self.graph.node_seq(node);
 
             // check that the rest of the node sequence matches the input sequence
-            // TODO: if the node_seq is lenger than the unitig, it should raise an error
             let nb_bases = min(node_seq.len(), self.seq.len() - self.next_pos);
             let expected_seq = node_seq.slice(Range {
                 start: self.graph.k(),

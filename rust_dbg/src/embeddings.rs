@@ -312,6 +312,14 @@ impl<P: Pathway> Embedding<P> for Scaffold<P> {
                 gap_size += 1;
                 continue;
             };
+            if contig.len() < graph.k() {
+                eprintln!(
+                    "[warning] Contig of length {} < k has been skipped",
+                    contig.len(),
+                );
+                gap_size += contig.len();
+                continue;
+            }
             gaps.push(gap_size);
             let contig = Contig::from_seq(contig, graph, encoder)?;
             contigs.push(contig);
