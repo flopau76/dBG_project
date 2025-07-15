@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Write};
 use std::path::Path;
@@ -229,7 +229,7 @@ impl Encoder<VecExtensions> for GreedyEncoder {
 
 pub struct GnomeEncoder {
     g: usize,
-    dict: HashMap<Vec<Node>, Vec<(usize, usize, usize)>>,
+    dict: BTreeMap<Vec<Node>, Vec<(u8, u8, u32)>>,
     record_names: Vec<String>,
     is_init: bool,
 }
@@ -238,7 +238,7 @@ impl Default for GnomeEncoder {
     fn default() -> Self {
         GnomeEncoder {
             g: 10,
-            dict: HashMap::new(),
+            dict: BTreeMap::new(),
             record_names: Vec::new(),
             is_init: false,
         }
@@ -249,7 +249,7 @@ impl GnomeEncoder {
     pub fn new(g: usize) -> Self {
         GnomeEncoder {
             g,
-            dict: HashMap::new(),
+            dict: BTreeMap::new(),
             record_names: Vec::new(),
             is_init: false,
         }
@@ -270,6 +270,7 @@ impl GnomeEncoder {
         writeln!(output_writer, "# input fasta: {}", input.display())?;
         writeln!(output_writer, "# g={}", self.g)?;
         self.print_stats_gnomes(&mut output_writer)?;
+        // self.analyse_single_gnome(&mut output_writer)?;
         output_writer.flush()?;
 
         Ok(())
@@ -286,27 +287,33 @@ impl GnomeEncoder {
         if self.is_init {
             return Ok(());
         }
+        eprint!(
+            "Initializing GnomeEncoder with g = {}, from fasta {}...",
+            self.g,
+            input.display()
+        );
         let mut input_reader = needletail::parse_fastx_file(input)?;
 
         let mut i = 0;
         while let Some(record) = input_reader.next() {
             let record = record?;
-            let id = unsafe { String::from_utf8_unchecked(record.id().to_owned()) };
-            self.record_names.push(id);
-            let seq = record.seq();
-            let scaffold = Scaffold::from_seq(&seq, graph, &BasicEncoder::default())?;
+            let record_name = unsafe { String::from_utf8_unchecked(record.id().to_owned()) };
+            self.record_names.push(record_name);
+            let record_seq = record.seq();
+            let scaffold = Scaffold::from_seq(&record_seq, graph, &BasicEncoder::default())?;
             for (j, contig) in scaffold.contigs.iter().enumerate() {
                 let gnome_iter = contig.nodes.windows(self.g);
                 for (k, gnome) in gnome_iter.enumerate() {
                     self.dict
                         .entry(gnome.to_vec())
                         .or_insert_with(Vec::new)
-                        .push((i, j, k));
+                        .push((i, j as u8, k as u32));
                 }
             }
             i += 1;
         }
         self.is_init = true;
+        eprintln!("done",);
         Ok(())
     }
 
@@ -322,7 +329,7 @@ impl GnomeEncoder {
                 let mut haplo_counts = vec![0 as u16; self.record_names.len()];
                 for (i, _j, _k) in v {
                     // increment the count for the corresponding scaffold
-                    haplo_counts[*i] += 1;
+                    haplo_counts[*i as usize] += 1;
                 }
                 haplo_counts
             })
@@ -358,7 +365,7 @@ impl GnomeEncoder {
         writeln!(output_writer)?;
 
         for v in &dict_haplo {
-            for (i, count) in v.iter().enumerate() {
+            for (i, count) in v.into_iter().enumerate() {
                 if i > 0 {
                     write!(output_writer, "\t")?;
                 }
@@ -367,6 +374,72 @@ impl GnomeEncoder {
             writeln!(output_writer)?;
         }
 
+        Ok(())
+    }
+
+    /// Find all occurrences of a g-node-mer of size <=g in the dictionary.
+    fn find_gnome(&self, gnome: &[Node]) -> Vec<(u8, u8, u32)> {
+        if gnome.len() > self.g {
+            panic!(
+                "G-node-mer length {} exceeds the maximum allowed size {}",
+                gnome.len(),
+                self.g
+            );
+        }
+        if gnome.len() == self.g {
+            return self.dict.get(gnome).unwrap_or(&vec![]).to_vec();
+        }
+        let mut left = gnome.to_vec();
+        left.extend_from_slice(&vec![Node::MIN; self.g - gnome.len()]);
+        let mut right = gnome.to_vec();
+        right.extend_from_slice(&vec![Node::MAX; self.g - gnome.len()]);
+        self.dict
+            .range(left..=right)
+            .flat_map(|(_k, v)| v.to_vec())
+            .collect::<Vec<_>>()
+    }
+
+    fn analyse_single_gnome(
+        &self,
+        output_writer: &mut BufWriter<File>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut iter = self.dict.iter();
+
+        // find all gnomes which appears in at least half of the records
+        let mut occurences = Vec::new();
+        while let Some((_gnome, occurrence)) = iter.next() {
+            let nb_genomes = occurrence
+                .iter()
+                .map(|(i, _j, _k)| i)
+                .collect::<HashSet<_>>()
+                .len();
+            if nb_genomes < self.record_names.len() / 2 {
+                continue;
+            }
+            // if occurrence.len() == 1 {
+            //     continue;
+            // }
+            occurences.push(occurrence);
+        }
+        occurences.sort();
+
+        let mut count: u32 = 1;
+        let mut previous_occ = occurences[0];
+        for &occ in occurences[1..].iter() {
+            if previous_occ
+                .iter()
+                .map(|(i, j, k)| (*i, *j, *k + count))
+                .collect::<Vec<_>>()
+                == *occ
+            {
+                count += 1;
+            } else {
+                writeln!(output_writer, "{:?}\t{}", previous_occ, count)?;
+                count = 1;
+                previous_occ = occ;
+            }
+        }
+        writeln!(output_writer, "{:?}\t{}", previous_occ, count)?;
         Ok(())
     }
 }

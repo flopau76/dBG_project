@@ -65,7 +65,7 @@ enum Commands {
         max_depth: usize,
     },
     /// Encode a continuous sequence into a path in the graph
-    EncodeExp {
+    EncodeTest {
         /// Path to the sequence file (fasta format)
         #[arg(short, long)]
         input: PathBuf,
@@ -182,7 +182,7 @@ impl Commands {
                     encoder.encode_from_fasta(input, output, &graph)
                 });
             }
-            Commands::EncodeExp {
+            Commands::EncodeTest {
                 input,
                 output,
                 graph,

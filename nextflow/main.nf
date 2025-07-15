@@ -1,7 +1,7 @@
 process build_graph {
     conda 'bioconda::ggcat'
-    publishDir('data/graphs/bin', pattern: "*.bin", mode: 'copy')
-    publishDir('data/graphs/unitigs', pattern: "*.unitigs", mode: 'move')
+    publishDir("${params.outdir}/graphs/bin", pattern: "*.bin", mode: 'copy')
+    publishDir("${params.outdir}/graphs/unitigs", pattern: "*.unitigs", mode: 'move')
     input: path (fasta_file, arity: 1)
     output:
         path ("${fasta_file}_k${params.k}.unitigs"), emit: unitig_file
@@ -14,7 +14,7 @@ process build_graph {
     """
 }
 process encode_paths {
-    publishDir ('data/encodings', mode: 'move')
+    publishDir ("${params.outdir}/encodings", mode: 'move')
     input: tuple path(fasta_file), path(bin_graph)
     output:
         path "${fasta_file}.encoding"
@@ -26,7 +26,7 @@ process encode_paths {
     """
 }
 process encode_paths_tests {
-    publishDir ('data/gnome_stats', mode: 'move')
+    publishDir ("${params.outdir}/gnome_stats", mode: 'move')
     input:
         tuple path(fasta_file), path(bin_graph), val(g_size)
     output:
@@ -34,21 +34,21 @@ process encode_paths_tests {
 
     script:
     """
-    ${params.rust} encode-exp -i $fasta_file -g $bin_graph --gg $g_size -o "g${g_size}_${fasta_file}.gnome_stats"
+    ${params.rust} encode-test -i $fasta_file -g $bin_graph --gg $g_size -o "g${g_size}_${fasta_file}.gnome_stats"
     """
 }
 
 process split_communities {
-    publishDir './'
+    publishDir "${params.outdir}"
     input: val input_files
-    output: path "data/clusters/*.fa"
+    output: path "fasta/clusters/*.fa"
 
     script:
     """
     divide_by_chromosomes.sh \
         -f ${input_files} \
         -k ${params.k} \
-        -o data
+        -o fasta
     """
 }
 process concat_fasta {
@@ -71,6 +71,6 @@ workflow {
     build_graph(out.flatten())
     // encode_paths(build_graph.output.bin_graph)
 
-    g_size = channel.of( 1,2,3,4,5,6,7,8,9,10,11,12,13,14,16,18,20 )
+    g_size = channel.of( 1,2,3,4,5,6,8,10,12,14,16,18,20 )
     encode_paths_tests(build_graph.output.bin_graph.combine(g_size))
 }
