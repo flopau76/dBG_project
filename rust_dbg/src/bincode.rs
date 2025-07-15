@@ -104,10 +104,11 @@ fn encode_target_nodes(
     encoder: &mut impl Encoder,
 ) -> Result<(), EncodeError> {
     for ext in extensions {
-        if let Extension::TargetNode(node) = ext {
-            node.encode(encoder)?;
-        } else {
-            panic!("Expected only TargetNode in packed patch");
+        match ext {
+            Extension::TargetNode(node) => {
+                node.encode(encoder)?;
+            }
+            _ => unreachable!("Should be called on patches containing only TargetNode"),
         }
     }
     Ok(())
@@ -122,7 +123,7 @@ fn encode_next_nucleotides(
         .iter()
         .map(|ext| match ext {
             Extension::NextNucleotide(base) => *base,
-            _ => panic!("Expected only NextNucleotide in packed patch"),
+            _ => unreachable!("Should be called on patches containing only NextNucleotide"),
         })
         .collect::<Vec<u8>>();
     let packed_nucl = pack_bases(&nucl);
@@ -136,10 +137,11 @@ fn encode_repetitions(
     encoder: &mut impl Encoder,
 ) -> Result<(), EncodeError> {
     for ext in extensions {
-        if let Extension::Repetition(nb_repeats, offset) = ext {
-            (nb_repeats, offset).encode(encoder)?;
-        } else {
-            panic!("Expected only Repetition in packed patch");
+        match ext {
+            Extension::Repetition(nb_repeats, offset) => {
+                (nb_repeats, offset).encode(encoder)?;
+            }
+            _ => unreachable!("Should be called on patches containing only Repetition"),
         }
     }
     Ok(())
@@ -205,9 +207,7 @@ impl Encode for VecExtensions {
                 0 => encode_target_nodes(&patch, encoder)?,
                 1 => encode_next_nucleotides(&patch, encoder)?,
                 2 => encode_repetitions(&patch, encoder)?,
-                _ => {
-                    panic!("Unreachable");
-                }
+                _ => unreachable!(),
             }
         }
         Ok(())
