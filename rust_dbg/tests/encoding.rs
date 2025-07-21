@@ -1,5 +1,4 @@
-use rust_dbg::embeddings::{Embedding, VecExtensions};
-use rust_dbg::encoder::GreedyEncoder;
+use rust_dbg::encoder::{Embedding, GreedyEncoder, VecExtensions};
 use rust_dbg::graph::SequenceSet;
 use rust_dbg::{BaseGraph, Graph};
 

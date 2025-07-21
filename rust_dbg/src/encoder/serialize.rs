@@ -1,8 +1,4 @@
-//! To serialize and deserialize the `Node` and `VecExtensions` types using the bincode library.
-//! The serialization of `Scaffold` and `Contig` is then derived automatically from these implementations.
-
-use crate::embeddings::{Extension, VecExtensions};
-use crate::Node;
+//! To serialize and deserialize the data produced by the different encoders.
 
 use bincode::error::{AllowedEnumVariants, DecodeError, EncodeError};
 use bincode::{
@@ -10,6 +6,10 @@ use bincode::{
     enc::{write::Writer, Encoder},
 };
 use bincode::{BorrowDecode, Decode, Encode};
+
+use crate::Node;
+
+use super::greedy_encoder::{Extension, VecExtensions};
 
 //####################################################################################
 //                             Serialize  Node                                      //
@@ -192,7 +192,7 @@ fn decode_repetitions<D: Decoder>(
 
 impl Encode for VecExtensions {
     fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
-        let patches = group_extensions(&self.0);
+        let patches = group_extensions(&self);
         patches.len().encode(encoder)?;
         for patch in patches {
             let id = match patch[0] {

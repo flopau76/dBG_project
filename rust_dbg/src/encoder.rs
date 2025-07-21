@@ -1,24 +1,57 @@
-use std::collections::{BTreeMap, HashSet, VecDeque};
-use std::fs::File;
-use std::io::{BufReader, BufWriter, Write};
-use std::path::Path;
+//! Encodes various dna sequence into a graph, from the simple path to the scaffold with gaps.
+
+use derive_more::with_trait::{Add, AddAssign, Sum};
+
+use std::{
+    fmt::{Debug, Display},
+    fs::File,
+    io::{BufReader, BufWriter, Write},
+    path::Path,
+};
 
 use bincode::{Decode, Encode};
-use packed_seq::Seq;
+use needletail::Sequence;
+use packed_seq::{PackedSeqVec, SeqVec};
 
-use crate::embeddings::{
-    Embedding, Extension, Pathway, PathwayStats, Scaffold, VecExtensions, VecNodes,
-};
-use crate::graph::shortest_path;
-use crate::{Graph, KmerStorage, Node};
+use crate::{Graph, KmerStorage, Node, NodeIterator, PathwayError};
+
+mod basic_encoder;
+mod gnome_encoder;
+mod greedy_encoder;
+mod serialize;
+
+pub use basic_encoder::BasicEncoder;
+pub use gnome_encoder::GnomeEncoder;
+pub use greedy_encoder::{Extension, GreedyEncoder, VecExtensions};
 
 //####################################################################################
-//                                 Greedy Encoder                                   //
+//                                    Encoding                                      //
 //####################################################################################
 
-pub trait Encoder<P: Pathway>: Sized {
+/// The encoding of a path in a de Bruijn graph.
+pub trait Encoding: Sized + Debug {
+    type Stats: EncodingStats;
+
+    /// Decode the data into a list of nodes.
+    fn decode(&self, graph: &Graph<impl KmerStorage>) -> Vec<Node>;
+
+    /// Get some statistics.
+    fn get_encoding_stats(&self, graph: &Graph<impl KmerStorage>) -> Self::Stats;
+}
+
+/// Some stats describing an encoding.
+pub trait EncodingStats: Sized + AddAssign + Add<Self> + Sum<Self> + Display + Default {}
+
+//####################################################################################
+//                                    Encoder                                       //
+//####################################################################################
+
+/// A structure transforming a path in a graph into an encoding.
+pub trait Encoder: Sized {
+    type Encoding: Encoding + Encode + Decode<()>;
+
     /// Transform a list of nodes into any type of encoding
-    fn encode_path(&self, nodes: VecNodes, graph: &Graph<impl KmerStorage>) -> P;
+    fn encode_path(&self, nodes: Vec<Node>, graph: &Graph<impl KmerStorage>) -> Self::Encoding;
 
     /// Encode a fasta file into a binary format using the provided graph.
     fn encode_from_fasta(
@@ -26,10 +59,7 @@ pub trait Encoder<P: Pathway>: Sized {
         input: &Path,
         output: &Path,
         graph: &Graph<impl KmerStorage>,
-    ) -> Result<(), Box<dyn std::error::Error>>
-    where
-        P: Encode,
-    {
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let mut input_reader = needletail::parse_fastx_file(input)?;
         let mut output_writer = BufWriter::new(File::create(output)?);
 
@@ -39,7 +69,7 @@ pub trait Encoder<P: Pathway>: Sized {
             let seq = record.seq();
             eprintln!("Encoding record {}", id);
             println!(">{}", id);
-            let mut scaffold = Scaffold::from_seq(&seq, graph, self)?;
+            let mut scaffold: Scaffold<Self::Encoding> = Scaffold::from_seq(&seq, graph, self)?;
             scaffold.id = id;
             bincode::encode_into_std_write(
                 scaffold,
@@ -56,14 +86,11 @@ pub trait Encoder<P: Pathway>: Sized {
         input: &Path,
         output: &Path,
         graph: &Graph<impl KmerStorage>,
-    ) -> Result<(), Box<dyn std::error::Error>>
-    where
-        P: Decode<()>,
-    {
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let mut input_reader = BufReader::new(File::open(input)?);
         let mut output_writer = BufWriter::new(File::create(output)?);
 
-        while let Ok(scaffold) = bincode::decode_from_std_read::<Scaffold<VecExtensions>, _, _>(
+        while let Ok(scaffold) = bincode::decode_from_std_read::<Scaffold<Self::Encoding>, _, _>(
             &mut input_reader,
             bincode::config::standard(),
         ) {
@@ -78,368 +105,181 @@ pub trait Encoder<P: Pathway>: Sized {
         Ok(())
     }
 
-    /// Get some stats about the binary encoding.
+    /// Print some stats about the encoding.
     fn print_stats(
         &self,
         input: &Path,
         graph: &Graph<impl KmerStorage>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn std::error::Error>>
+    where
+        Self::Encoding: Decode<()>,
+    {
         let mut input_reader = BufReader::new(File::open(input)?);
 
-        let mut stats = PathwayStats::default();
-        while let Ok(scaffold) = bincode::decode_from_std_read::<Scaffold<VecExtensions>, _, _>(
+        let mut stats = <Self::Encoding as Encoding>::Stats::default();
+        while let Ok(scaffold) = bincode::decode_from_std_read::<Scaffold<Self::Encoding>, _, _>(
             &mut input_reader,
             bincode::config::standard(),
         ) {
             stats += scaffold.get_stats(&graph);
         }
-        stats.print();
+        eprintln!("Stats for {}: ", input.display());
+        eprintln!("{}", stats);
 
         Ok(())
     }
 }
 
-/// Basic encoder, which transforms a list of nodes into a sequence of extensions.
-#[derive(Default)]
-pub struct BasicEncoder;
-impl Encoder<VecNodes> for BasicEncoder {
-    fn encode_path(&self, nodes: VecNodes, _graph: &Graph<impl KmerStorage>) -> VecNodes {
-        nodes
+//####################################################################################
+//                                   Embedding                                      //
+//####################################################################################
+
+/// Any sequence, which can be embedded into a graph as a combination of multiple encodings.
+pub trait Embedding<P: Encoding>: Sized {
+    /// Retrieve the embeddded sequence.
+    fn get_seq(&self, graph: &Graph<impl KmerStorage>) -> Vec<u8>;
+
+    /// Embed a sequence into a graph.
+    fn from_seq(
+        seq: &[u8],
+        graph: &Graph<impl KmerStorage>,
+        encoder: &impl Encoder<Encoding = P>,
+    ) -> Result<Self, PathwayError>;
+
+    // Get some statistics.
+    fn get_stats(&self, graph: &Graph<impl KmerStorage>) -> P::Stats;
+}
+
+impl<P: Encoding> Embedding<P> for P {
+    fn get_seq(&self, graph: &Graph<impl KmerStorage>) -> Vec<u8> {
+        let nodes = self.decode(graph);
+        graph.path_seq(&nodes)
     }
-}
-
-/// Greedy encoder, which transforms a list of nodes into some extensions based on specific cutoffs.
-pub struct GreedyEncoder {
-    pub min_sp_length: usize,
-    pub max_sp_length: usize,
-    pub min_nb_repeats: u16,
-    pub max_offset: u8,
-}
-
-impl Default for GreedyEncoder {
-    fn default() -> Self {
-        GreedyEncoder {
-            min_sp_length: 10,
-            max_sp_length: 100,
-            min_nb_repeats: 10,
-            max_offset: u8::MAX,
+    fn from_seq(
+        seq: &[u8],
+        graph: &Graph<impl KmerStorage>,
+        encoder: &impl Encoder<Encoding = P>,
+    ) -> Result<Self, PathwayError> {
+        let seq = PackedSeqVec::from_ascii(seq);
+        let mut iterator = NodeIterator::new(graph, seq)?;
+        let mut nodes = Vec::default();
+        while let Some(node) = iterator.next()? {
+            nodes.push(node);
         }
+        Ok(encoder.encode_path(nodes, graph))
     }
-}
-
-impl GreedyEncoder {
-    // Search for repetitions in a list using Lempel-Ziv
-    // Return a Vector of (start, nb_repeats, offset) so that list[start .. start + nb_repeats] = list[start-1 - offset .. start-1- offset + nb_repeats]
-    // Maximal offset and minimal number of repeats are defined in the parameters
-    fn get_repetitions<D: Eq>(&self, list: &Vec<D>) -> VecDeque<(usize, (u16, u8))> {
-        let mut repetitions = VecDeque::new();
-        let mut current_pos = 1;
-
-        while current_pos < list.len() {
-            let mut best_nb_repeats = 0;
-            let mut best_offset = 0;
-
-            // find the longest repetition in the sliding window
-            for offset in 0..=(self.max_offset as usize).min(current_pos - 1) {
-                let mut nb_repeats = 0;
-                while list[current_pos - 1 - offset + nb_repeats] == list[current_pos + nb_repeats]
-                {
-                    nb_repeats += 1;
-                    if current_pos + nb_repeats >= list.len() {
-                        break;
-                    }
-                }
-                if nb_repeats > best_nb_repeats {
-                    best_nb_repeats = nb_repeats;
-                    best_offset = offset;
-                }
-            }
-            // if the repetition is long enough, add it to the list
-            if best_nb_repeats >= self.min_nb_repeats as usize {
-                repetitions.push_back((current_pos, (best_nb_repeats as u16, best_offset as u8)));
-                current_pos += best_nb_repeats;
-            } else {
-                current_pos += 1;
-            }
-        }
-        repetitions
-    }
-}
-
-impl Encoder<VecExtensions> for GreedyEncoder {
-    fn encode_path(&self, nodes: VecNodes, graph: &Graph<impl KmerStorage>) -> VecExtensions {
-        let mut extensions = vec![Extension::TargetNode(
-            *nodes.first().expect("The node vector is empty"),
-        )];
-
-        let mut current_position = 0;
-        let mut repetitions = self.get_repetitions(&nodes);
-        repetitions.push_back((nodes.len(), (0, 0))); // add a sentinel to avoid adding the last part separately
-
-        while let Some((rep_pos, rep)) = repetitions.pop_front() {
-            let target_pos = rep_pos - 1;
-            while current_position < target_pos {
-                let (mut target_node, mut length) = shortest_path::get_next_target_node_naive(
-                    graph,
-                    &nodes,
-                    current_position,
-                    self.max_sp_length,
-                )
-                .unwrap();
-                if current_position + length >= target_pos {
-                    length = target_pos - current_position;
-                    target_node = nodes[target_pos];
-                }
-                // if the shortest path is long enough, we use it to extend the path
-                if length >= self.min_sp_length {
-                    let ext = Extension::TargetNode(target_node);
-                    extensions.push(ext);
-                    println!("{:?}", ext);
-                }
-                // otherwise, we encode its nodes directly (2 bits per node)
-                else {
-                    extensions.extend(
-                        nodes[current_position + 1..current_position + 1 + length]
-                            .iter()
-                            .map(|&node| {
-                                let ext = Extension::NextNucleotide(
-                                    graph.node_seq(node).as_slice().get(graph.k() - 1),
-                                );
-                                println!("{:?}", ext);
-                                ext
-                            }),
-                    );
-                }
-                current_position += length as usize;
-            }
-            // add the repetition
-            let ext = Extension::Repetition(rep.0, rep.1);
-            extensions.push(ext);
-            println!("{:?}", ext);
-            current_position += rep.0 as usize;
-        }
-        extensions.pop(); // remove the sentinel
-        VecExtensions(extensions)
+    fn get_stats(&self, graph: &Graph<impl KmerStorage>) -> P::Stats {
+        self.get_encoding_stats(graph)
     }
 }
 
 //####################################################################################
-//                                   G-node-mer                                     //
+//                                   Contig                                         //
 //####################################################################################
 
-pub struct GnomeEncoder {
-    g: usize,
-    dict: BTreeMap<Vec<Node>, Vec<(u8, u8, u32)>>,
-    record_names: Vec<String>,
-    is_init: bool,
+/// Contig in a de Bruijn graph, represented as a path, along with a start and end offsets.
+#[derive(Encode, Decode, Debug, Clone)]
+pub struct Contig<P: Encoding> {
+    pub nodes: P,
+    pub start_offset: usize,
+    pub end_offset: usize,
 }
 
-impl Default for GnomeEncoder {
-    fn default() -> Self {
-        GnomeEncoder {
-            g: 10,
-            dict: BTreeMap::new(),
-            record_names: Vec::new(),
-            is_init: false,
+impl<P: Encoding> Embedding<P> for Contig<P> {
+    fn get_seq(&self, graph: &Graph<impl KmerStorage>) -> Vec<u8> {
+        let seq = self.nodes.get_seq(graph);
+        seq[self.start_offset..seq.len() - self.end_offset].to_owned()
+    }
+
+    fn from_seq(
+        seq: &[u8],
+        graph: &Graph<impl KmerStorage>,
+        encoder: &impl Encoder<Encoding = P>,
+    ) -> Result<Self, PathwayError> {
+        let seq = PackedSeqVec::from_ascii(seq);
+        let mut iterator = NodeIterator::new(graph, seq)?;
+        let mut nodes = Vec::default();
+        while let Some(node) = iterator.next()? {
+            nodes.push(node);
         }
+        let nodes = encoder.encode_path(nodes, graph);
+        Ok(Contig {
+            nodes,
+            start_offset: iterator.start_offset.expect("Start offset should be set"),
+            end_offset: iterator.end_offset.expect("End offset should be set"),
+        })
+    }
+
+    fn get_stats(&self, graph: &Graph<impl KmerStorage>) -> P::Stats {
+        self.nodes.get_stats(graph)
     }
 }
 
-impl GnomeEncoder {
-    pub fn new(g: usize) -> Self {
-        GnomeEncoder {
-            g,
-            dict: BTreeMap::new(),
-            record_names: Vec::new(),
-            is_init: false,
-        }
-    }
+//####################################################################################
+//                                  Scaffold                                        //
+//####################################################################################
 
-    pub fn encode_from_fasta(
-        &mut self,
-        input: &Path,
-        output: &Path,
-        graph: &Graph<impl KmerStorage>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        // let mut input_reader = needletail::parse_fastx_file(input)?;
-        let mut output_writer = BufWriter::new(File::create(output)?);
+/// Scaffold in a de Bruijn graph, represented as an alternance of contigs and gaps of a given size.
+#[derive(Encode, Decode, Debug, Clone)]
+pub struct Scaffold<P: Encoding> {
+    pub id: String,
+    pub contigs: Vec<Contig<P>>,
+    pub gaps: Vec<usize>,
+}
 
-        self.init_from_fasta(input, graph)?;
-
-        // Write the g-node-mer dictionary to the output file
-        writeln!(output_writer, "# input fasta: {}", input.display())?;
-        writeln!(output_writer, "# g={}", self.g)?;
-        self.print_stats_gnomes(&mut output_writer)?;
-        // self.analyse_single_gnome(&mut output_writer)?;
-        output_writer.flush()?;
-
-        Ok(())
-    }
-
-    /// Initialize the encoder from a fasta file, creating a dictionary of g-node-mers.
-    /// The dictionary maps g-node-mer sequences to their occurrences in the scaffolds.
-    /// Each entry in the dictionary is a vector of tuples (scaffold_index, contig_index, position_in_contig).
-    fn init_from_fasta(
-        &mut self,
-        input: &Path,
-        graph: &Graph<impl KmerStorage>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        if self.is_init {
-            return Ok(());
-        }
-        eprint!(
-            "Initializing GnomeEncoder with g = {}, from fasta {}...",
-            self.g,
-            input.display()
+impl<P: Encoding> Embedding<P> for Scaffold<P> {
+    fn get_seq(&self, graph: &Graph<impl KmerStorage>) -> Vec<u8> {
+        assert_eq!(
+            self.contigs.len() + 1,
+            self.gaps.len(),
+            "Expected one more gap than contigs, but got {} contigs and {} gaps",
+            self.contigs.len(),
+            self.gaps.len()
         );
-        let mut input_reader = needletail::parse_fastx_file(input)?;
-
-        let mut i = 0;
-        while let Some(record) = input_reader.next() {
-            let record = record?;
-            let record_name = unsafe { String::from_utf8_unchecked(record.id().to_owned()) };
-            self.record_names.push(record_name);
-            let record_seq = record.seq();
-            let scaffold = Scaffold::from_seq(&record_seq, graph, &BasicEncoder::default())?;
-            for (j, contig) in scaffold.contigs.iter().enumerate() {
-                let gnome_iter = contig.nodes.windows(self.g);
-                for (k, gnome) in gnome_iter.enumerate() {
-                    self.dict
-                        .entry(gnome.to_vec())
-                        .or_insert_with(Vec::new)
-                        .push((i, j as u8, k as u32));
-                }
-            }
-            i += 1;
+        let mut seq = vec![b'N'; self.gaps[0]];
+        for (contig, gap) in self.contigs.iter().zip(&self.gaps[1..]) {
+            seq.extend(&contig.get_seq(graph));
+            seq.extend(std::iter::repeat(b'N').take(*gap));
         }
-        self.is_init = true;
-        eprintln!("done",);
-        Ok(())
+        seq
     }
 
-    fn print_stats_gnomes(
-        &self,
-        output_writer: &mut BufWriter<File>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        // group occurences per haplotype
-        let mut dict_haplo = self
-            .dict
-            .iter()
-            .map(|(_k, v)| {
-                let mut haplo_counts = vec![0 as u16; self.record_names.len()];
-                for (i, _j, _k) in v {
-                    // increment the count for the corresponding scaffold
-                    haplo_counts[*i as usize] += 1;
-                }
-                haplo_counts
-            })
-            .collect::<Vec<_>>();
-
-        // sort by decreasing number of occurrences
-        dict_haplo.sort_by(|a, b| {
-            let sum_a: u16 = a.iter().sum();
-            let sum_b: u16 = b.iter().sum();
-            match sum_b.cmp(&sum_a) {
-                std::cmp::Ordering::Equal => a.cmp(b),
-                ord => ord,
-            }
-        });
-
-        writeln!(
-            output_writer,
-            "# Number of records: {}",
-            self.record_names.len()
-        )?;
-        writeln!(
-            output_writer,
-            "# Number of different gnomes: {}",
-            self.dict.len()
-        )?;
-
-        for (i, name) in self.record_names.iter().enumerate() {
-            if i > 0 {
-                write!(output_writer, "\t")?;
-            }
-            write!(output_writer, "{}", name)?;
-        }
-        writeln!(output_writer)?;
-
-        for v in &dict_haplo {
-            for (i, count) in v.into_iter().enumerate() {
-                if i > 0 {
-                    write!(output_writer, "\t")?;
-                }
-                write!(output_writer, "{}", count)?;
-            }
-            writeln!(output_writer)?;
-        }
-
-        Ok(())
-    }
-
-    /// Find all occurrences of a g-node-mer of size <=g in the dictionary.
-    fn find_gnome(&self, gnome: &[Node]) -> Vec<(u8, u8, u32)> {
-        if gnome.len() > self.g {
-            panic!(
-                "G-node-mer length {} exceeds the maximum allowed size {}",
-                gnome.len(),
-                self.g
-            );
-        }
-        if gnome.len() == self.g {
-            return self.dict.get(gnome).unwrap_or(&vec![]).to_vec();
-        }
-        let mut left = gnome.to_vec();
-        left.extend_from_slice(&vec![Node::MIN; self.g - gnome.len()]);
-        let mut right = gnome.to_vec();
-        right.extend_from_slice(&vec![Node::MAX; self.g - gnome.len()]);
-        self.dict
-            .range(left..=right)
-            .flat_map(|(_k, v)| v.to_vec())
-            .collect::<Vec<_>>()
-    }
-
-    fn analyse_single_gnome(
-        &self,
-        output_writer: &mut BufWriter<File>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let mut iter = self.dict.iter();
-
-        // find all gnomes which appears in at least half of the records
-        let mut occurences = Vec::new();
-        while let Some((_gnome, occurrence)) = iter.next() {
-            let nb_genomes = occurrence
-                .iter()
-                .map(|(i, _j, _k)| i)
-                .collect::<HashSet<_>>()
-                .len();
-            if nb_genomes < self.record_names.len() / 2 {
+    fn from_seq(
+        seq: &[u8],
+        graph: &Graph<impl KmerStorage>,
+        encoder: &impl Encoder<Encoding = P>,
+    ) -> Result<Self, PathwayError> {
+        let mut contigs = Vec::new();
+        let mut gaps = Vec::new();
+        let mut gap_size = 0;
+        for contig in seq.normalize(false).split(|c| *c == b'N') {
+            if contig.is_empty() {
+                gap_size += 1;
+                continue;
+            };
+            if contig.len() < graph.k() {
+                eprintln!(
+                    "[warning] Contig of length {} < k has been skipped",
+                    contig.len(),
+                );
+                gap_size += contig.len();
                 continue;
             }
-            // if occurrence.len() == 1 {
-            //     continue;
-            // }
-            occurences.push(occurrence);
+            gaps.push(gap_size);
+            let contig = Contig::from_seq(contig, graph, encoder)?;
+            contigs.push(contig);
+            gap_size = 0;
         }
-        occurences.sort();
+        gaps.push(gap_size);
 
-        let mut count: u32 = 1;
-        let mut previous_occ = occurences[0];
-        for &occ in occurences[1..].iter() {
-            if previous_occ
-                .iter()
-                .map(|(i, j, k)| (*i, *j, *k + count))
-                .collect::<Vec<_>>()
-                == *occ
-            {
-                count += 1;
-            } else {
-                writeln!(output_writer, "{:?}\t{}", previous_occ, count)?;
-                count = 1;
-                previous_occ = occ;
-            }
-        }
-        writeln!(output_writer, "{:?}\t{}", previous_occ, count)?;
-        Ok(())
+        Ok(Scaffold {
+            id: String::default(),
+            contigs,
+            gaps,
+        })
+    }
+
+    fn get_stats(&self, graph: &Graph<impl KmerStorage>) -> P::Stats {
+        self.contigs.iter().map(|c| c.get_stats(graph)).sum()
     }
 }

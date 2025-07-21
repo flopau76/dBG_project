@@ -13,6 +13,7 @@ bincode = { version = "2" }
 vint64 = "1"
 clap = { version = "4", features = ["derive"] }
 
+derive_more = { version = "2", features = ["add_assign", "add", "sum", "deref", "deref_mut"] }
 textplots = "0.8"
 
 [dev-dependencies]
