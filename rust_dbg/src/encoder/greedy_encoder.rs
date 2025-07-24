@@ -24,7 +24,7 @@ pub enum Extension {
 impl Display for Extension {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Extension::TargetNode(node) => write!(f, "TN({:?})", node),
+            Extension::TargetNode(node) => write!(f, "TN({})", node),
             Extension::NextNucleotide(base) => write!(f, "NN({})", base),
             Extension::Repetition(nb_repeats, offset) => {
                 write!(f, "R({}-{})", nb_repeats, offset)
@@ -215,7 +215,7 @@ impl Encoder for GreedyEncoder {
                 if length >= self.min_sp_length {
                     let ext = Extension::TargetNode(target_node);
                     extensions.push(ext);
-                    println!("{:?}", ext);
+                    println!("{}", ext);
                 }
                 // otherwise, we encode its nodes directly (2 bits per node)
                 else {
@@ -226,7 +226,7 @@ impl Encoder for GreedyEncoder {
                                 let ext = Extension::NextNucleotide(
                                     graph.node_seq(node).as_slice().get(graph.k() - 1),
                                 );
-                                println!("{:?}", ext);
+                                println!("{}", ext);
                                 ext
                             }),
                     );
@@ -236,7 +236,7 @@ impl Encoder for GreedyEncoder {
             // add the repetition
             let ext = Extension::Repetition(rep.0, rep.1);
             extensions.push(ext);
-            println!("{:?}", ext);
+            println!("{}", ext);
             current_position += rep.0 as usize;
         }
         extensions.pop(); // remove the sentinel

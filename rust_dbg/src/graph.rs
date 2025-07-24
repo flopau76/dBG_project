@@ -1,7 +1,7 @@
 //! To create graphs from fasta/unitig files
 
 use smallvec::SmallVec;
-use std::fmt::Debug;
+use std::fmt::Display;
 use std::ops::Range;
 use std::{collections::HashSet, error::Error, path::Path};
 
@@ -81,7 +81,7 @@ impl SequenceSet {
 //####################################################################################
 
 /// Oriented node in a canonical de Bruijn graph
-#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Node {
     pub id: usize,
     pub is_rc: bool,
@@ -101,7 +101,7 @@ impl Node {
     };
 }
 
-impl Debug for Node {
+impl Display for Node {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if self.is_rc {
             write!(f, "Node(-{})", self.id)
