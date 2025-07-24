@@ -163,42 +163,10 @@ fn first_ancestor_on_path(
         .expect("Node should be visited from the right")
 }
 
-// Look if the `queue` at the given side has met the bfs from the opposite side, or the yet unexplored center of the path (between `pos_left` and `pos_right`).
-// If so, return the new end position, corresponding to the last ancestor on the right side of the path.
-fn shortcut_from_side(
-    queue: &Vec<Node>,
-    parents_left: &HashMap<Node, Vec<Node>>,
-    parents_right: &HashMap<Node, Vec<Node>>,
-    path: &Vec<Node>,
-    pos_left: usize,
-    pos_right: usize,
-    end_pos: usize,
-    side: Side,
-) -> usize {
-    let mut new_end_pos = end_pos;
-    let opposite_parents = side.choose(parents_right, parents_left);
-    for node in queue.iter() {
-        if opposite_parents.contains_key(node) || path[pos_left + 1..pos_right].contains(node) {
-            new_end_pos = std::cmp::min(
-                end_pos,
-                first_ancestor_on_path(
-                    *node,
-                    parents_right,
-                    &path[pos_left..=end_pos],
-                    side == Side::Left,
-                ) + pos_left
-                    - 1,
-            );
-        }
-    }
-    new_end_pos
-}
-
 /// Perform a (double-ended) BFS to find the next target_node to elongate `path` from `start_pos`.  
 /// Returns `(target_node, dist)`, such that:  
 ///  - `target_node`=`path[start_pos + dist]`  
 ///  - `path[start_pos..=start_pos+dist]` corresponds to the shortest path between `path[start_pos]`` and `target_node`.
-#[deprecated = "This is not working properly for now. Use get_next_target_node_naive instead."]
 pub fn get_next_target_node<K: KmerStorage>(
     graph: &Graph<K>,
     path: &Vec<Node>,
@@ -243,29 +211,94 @@ pub fn get_next_target_node<K: KmerStorage>(
 
         // advance BFS
         while pos_left < pos_right && new_end_pos == end_pos {
-            // choose the smaller side to elongate
-            let side = if queue_left.len() < queue_right.len() {
+            // chose which side to elongate
+            // note: when a shortcut is found, right side is reset but not left side.
+            // GAMMA indicates at wich point the left side is preferred.
+            const GAMMA: usize = 3;
+            let side = if queue_left.len() <= GAMMA * queue_right.len() {
                 pos_left += 1;
                 Side::Left
             } else {
                 pos_right -= 1;
                 Side::Right
             };
-            let queue = side.choose(&mut queue_left, &mut queue_right);
-            let parents = side.choose(&mut parents_left, &mut parents_right);
             // advance the BFS from the given side
-            advance_bfs_parents_all(graph, side, queue, parents);
-            // check if we found a shortcut
-            new_end_pos = new_end_pos.min(shortcut_from_side(
-                queue,
-                &parents_left,
-                &parents_right,
-                path,
-                pos_left,
-                pos_right,
-                end_pos,
-                side,
-            ));
+            {
+                let queue = side.choose(&mut queue_left, &mut queue_right);
+                let parents = side.choose(&mut parents_left, &mut parents_right);
+                advance_bfs_parents_all(graph, side, queue, parents);
+            }
+            // check if the path is unique: each node on the path should only have one parent on both sides
+            match side {
+                Side::Left => {
+                    if parents_left[&path[pos_left]].len() > 1 {
+                        new_end_pos = new_end_pos.min(pos_left - 1);
+                    }
+                }
+                Side::Right => {
+                    if parents_right[&path[pos_right]].len() > 1 {
+                        for parent in parents_right[&path[pos_right]].iter() {
+                            if parent == &path[pos_right + 1] {
+                                continue;
+                            }
+                            new_end_pos = new_end_pos.min(
+                                first_ancestor_on_path(
+                                    *parent,
+                                    &parents_right,
+                                    &path[pos_left + 1..=end_pos],
+                                    true,
+                                ) + pos_left,
+                            );
+                        }
+                    }
+                }
+            }
+            // check if the two BFS have met
+            let queue = side.choose(&queue_left, &queue_right);
+            let parents_opposite = side.choose(&parents_right, &parents_left);
+            if pos_left == pos_right {
+                // the two BFS should have met at a single node, belonging to the path
+                for node in queue.iter() {
+                    // we found a node that is in the other BFS
+                    if node != &path[pos_left] && parents_opposite.contains_key(node) {
+                        new_end_pos = new_end_pos.min(
+                            first_ancestor_on_path(
+                                *node,
+                                &parents_right,
+                                &path[pos_left + 1..=end_pos],
+                                true,
+                            ) + pos_left,
+                        );
+                    }
+                }
+            } else {
+                // the two BFS should not have met at all
+                for node in queue.iter() {
+                    // we found a node that is in the other BFS
+                    if parents_opposite.contains_key(node) {
+                        new_end_pos = new_end_pos.min(
+                            first_ancestor_on_path(
+                                *node,
+                                &parents_right,
+                                &path[pos_left + 1..=end_pos],
+                                true,
+                            ) + pos_left,
+                        );
+                    }
+                    // we found a node between the two BFS, which should not be reached yet
+                    if let Some(node) = path[pos_left + 1..pos_right].iter().find(|&&n| n == *node)
+                    {
+                        new_end_pos = new_end_pos.min(
+                            first_ancestor_on_path(
+                                *node,
+                                &parents_right,
+                                &path[pos_left + 1..=end_pos],
+                                side == Side::Left,
+                            ) + pos_left,
+                        );
+                    }
+                }
+            }
         }
         // if we found a shortcut, we have to restart the BFS with a new target position
         if new_end_pos < end_pos {

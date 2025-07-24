@@ -71,5 +71,6 @@ fn random_seq_encoding() {
     let encoding = VecExtensions::from_seq(&seq_in, &graph, &encoder).unwrap();
     let seq_out = encoding.get_seq(&graph);
 
+    assert_eq!(seq_in.len(), seq_out.len());
     assert_eq!(seq_in, seq_out);
 }

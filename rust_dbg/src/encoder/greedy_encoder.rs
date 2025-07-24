@@ -200,7 +200,7 @@ impl Encoder for GreedyEncoder {
         while let Some((rep_pos, rep)) = repetitions.pop_front() {
             let target_pos = rep_pos - 1;
             while current_position < target_pos {
-                let (mut target_node, mut length) = shortest_path::get_next_target_node_naive(
+                let (mut target_node, mut length) = shortest_path::get_next_target_node(
                     graph,
                     &nodes,
                     current_position,
