@@ -25,18 +25,6 @@ process encode_paths {
     ${params.rust} encode -i $fasta_file -g $bin_graph  -o "${fasta_file}.encoding" > "${fasta_file}.encoding.txt"
     """
 }
-process encode_paths_tests {
-    publishDir ("${params.outdir}/gnome_stats", mode: 'move')
-    input:
-        tuple path(fasta_file), path(bin_graph), val(g_size)
-    output:
-        path "g${g_size}_${fasta_file}.gnome_stats"
-
-    script:
-    """
-    ${params.rust} encode-test -i $fasta_file -g $bin_graph --gg $g_size -o "g${g_size}_${fasta_file}.gnome_stats"
-    """
-}
 
 process split_communities {
     publishDir "${params.outdir}"
@@ -69,8 +57,5 @@ workflow {
     out = concat_fasta(samples_list)
 
     build_graph(out.flatten())
-    // encode_paths(build_graph.output.bin_graph)
-
-    g_size = channel.of( 1,2,3,4,5,6,8,10,12,14,16,18,20 )
-    encode_paths_tests(build_graph.output.bin_graph.combine(g_size))
+    encode_paths(build_graph.output.bin_graph)
 }

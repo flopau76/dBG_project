@@ -16,12 +16,10 @@ use packed_seq::{PackedSeqVec, SeqVec};
 use crate::{Graph, KmerStorage, Node, NodeIterator, PathwayError};
 
 mod basic_encoder;
-mod gnome_encoder;
 mod greedy_encoder;
 mod serialize;
 
 pub use basic_encoder::BasicEncoder;
-pub use gnome_encoder::GnomeEncoder;
 pub use greedy_encoder::{Extension, GreedyEncoder, VecExtensions};
 
 //####################################################################################
