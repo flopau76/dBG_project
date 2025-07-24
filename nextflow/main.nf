@@ -1,7 +1,7 @@
 process build_graph {
     conda 'bioconda::ggcat'
-    publishDir('data/graphs/bin', pattern: "*.bin", mode: 'copy')
-    publishDir('data/graphs/unitigs', pattern: "*.unitigs", mode: 'move')
+    publishDir("${params.outdir}/graphs/bin", pattern: "*.bin", mode: 'copy')
+    publishDir("${params.outdir}/graphs/unitigs", pattern: "*.unitigs", mode: 'move')
     input: path (fasta_file, arity: 1)
     output:
         path ("${fasta_file}_k${params.k}.unitigs"), emit: unitig_file
@@ -14,7 +14,7 @@ process build_graph {
     """
 }
 process encode_paths {
-    publishDir ('data/encodings', mode: 'move')
+    publishDir ("${params.outdir}/encodings", mode: 'move')
     input: tuple path(fasta_file), path(bin_graph)
     output:
         path "${fasta_file}.encoding"
@@ -25,29 +25,30 @@ process encode_paths {
     ${params.rust} encode -i $fasta_file -g $bin_graph  -o "${fasta_file}.encoding" > "${fasta_file}.encoding.txt"
     """
 }
+process encode_paths_tests {
+    publishDir ("${params.outdir}/gnome_stats", mode: 'move')
+    input:
+        tuple path(fasta_file), path(bin_graph), val(g_size)
+    output:
+        path "g${g_size}_${fasta_file}.gnome_stats"
 
-// Actual work of building the graph and encoding the paths
-// Input is a single fasta file containing multiple sequences
-workflow encoding {
-    take:
-    fasta_file
-
-    main:
-    build_graph(fasta_file)
-    encode_paths(build_graph.output.bin_graph)
+    script:
+    """
+    ${params.rust} encode-test -i $fasta_file -g $bin_graph --gg $g_size -o "g${g_size}_${fasta_file}.gnome_stats"
+    """
 }
 
 process split_communities {
-    publishDir './'
+    publishDir "${params.outdir}"
     input: val input_files
-    output: path "data/clusters/*.fa"
+    output: path "fasta/clusters/*.fa"
 
     script:
     """
     divide_by_chromosomes.sh \
         -f ${input_files} \
         -k ${params.k} \
-        -o data
+        -o fasta
     """
 }
 process concat_fasta {
@@ -60,22 +61,16 @@ process concat_fasta {
     """
 }
 
-// Preprocessing step, which (if enabled) splits the input files into communities
-workflow preprocess {
-    take:
-    samples_list
-
-    main:
+workflow {
+    samples_list = params.input_files
     if (params.preprocess)
     out = split_communities(samples_list)
     else
     out = concat_fasta(samples_list)
 
-    emit:
-    out
-}
+    build_graph(out.flatten())
+    // encode_paths(build_graph.output.bin_graph)
 
-workflow {
-    preprocess(params.input_files)
-    encoding(preprocess.out.flatten())
+    g_size = channel.of( 1,2,3,4,5,6,8,10,12,14,16,18,20 )
+    encode_paths_tests(build_graph.output.bin_graph.combine(g_size))
 }

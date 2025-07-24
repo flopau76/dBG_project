@@ -46,8 +46,6 @@ pub struct SequenceSet {
     sequences: PackedSeqVec,
     start_positions: Vec<usize>,
     lengths: Vec<u32>,
-    // Note: if we want nodes to start at the begining of an u8, there might be a gap of 1-6 nucleotides between two sequences.
-    // If it is not the case, there might be undefined behaviour or panic later on.
 }
 
 impl SequenceSet {
@@ -83,7 +81,7 @@ impl SequenceSet {
 //####################################################################################
 
 /// Oriented node in a canonical de Bruijn graph
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Node {
     pub id: usize,
     pub is_rc: bool,
@@ -93,6 +91,14 @@ impl Node {
     pub fn new(id: usize, is_rc: bool) -> Self {
         Self { id, is_rc }
     }
+    pub const MAX: Self = Self {
+        id: usize::MAX,
+        is_rc: true,
+    };
+    pub const MIN: Self = Self {
+        id: 0,
+        is_rc: false,
+    };
 }
 
 impl Debug for Node {

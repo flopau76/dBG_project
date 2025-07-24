@@ -2,13 +2,9 @@
 This crates provides methods for the construction and the manipulation of de Bruijn graphs. It builds heavily upon the crate `debruijn` developped by 10x Genomics.
 */
 
-// pub mod encoder;
-pub mod embeddings;
 pub mod encoder;
 pub mod graph;
 pub mod kmer;
-
-mod bincode;
 
 // pub use ... for re-exports;
 use std::io::Write;
@@ -21,7 +17,8 @@ pub use kmer::KmerStorage;
 //####################################################################################
 
 /// Removes the previous line and print a new progress bar
-pub fn print_progress_bar(current: usize, total: usize) {
+#[allow(dead_code)]
+fn print_progress_bar(current: usize, total: usize) {
     let bar_width = 40;
     let progress = current as f32 / total as f32;
     let filled = (progress * bar_width as f32).round() as usize;
@@ -36,4 +33,20 @@ pub fn print_progress_bar(current: usize, total: usize) {
     );
     eprint!("\r{}", bar); // carriage return to overwrite the current line
     std::io::stderr().flush().unwrap();
+}
+
+/// Format a long integer with commas
+fn format_int(n: usize) -> String {
+    let s = n.to_string();
+    let mut result = String::new();
+    let mut chars = s.chars().rev().peekable();
+
+    while let Some(c) = chars.next() {
+        result.push(c);
+        if chars.peek().is_some() && result.len() % 4 == 3 {
+            result.push(',');
+        }
+    }
+
+    result.chars().rev().collect()
 }

@@ -1,4 +1,4 @@
-use rust_dbg::encoder::{Encoder, GreedyEncoder};
+use rust_dbg::encoder::{Encoder, GnomeEncoder, GreedyEncoder};
 use rust_dbg::BaseGraph;
 
 use std::path::PathBuf;
@@ -63,6 +63,24 @@ enum Commands {
         /// Max depth in Djikistra algorithm for shortest path
         #[arg(long, default_value_t = 100)]
         max_depth: usize,
+    },
+    /// Encode a continuous sequence into a path in the graph
+    EncodeTest {
+        /// Path to the sequence file (fasta format)
+        #[arg(short, long)]
+        input: PathBuf,
+
+        /// Path to the output file (custom text file)
+        #[arg(short, long)]
+        output: PathBuf,
+
+        /// Path to the encoded graph
+        #[arg(short, long)]
+        graph: PathBuf,
+
+        /// Size of the g-node-mer
+        #[arg(long, default_value_t = 10)]
+        gg: usize,
     },
     /// Decode a path in the graph to retrieve the original sequence
     Decode {
@@ -158,6 +176,19 @@ impl Commands {
                     max_sp_length: *max_depth,
                     max_offset: 255,
                 };
+                let base = BaseGraph::load_from_binary(&graph).unwrap();
+                run_with_ks!(base.k(), {
+                    let graph = base.finish::<KS>();
+                    encoder.encode_from_fasta(input, output, &graph)
+                });
+            }
+            Commands::EncodeTest {
+                input,
+                output,
+                graph,
+                gg,
+            } => {
+                let mut encoder = GnomeEncoder::new(*gg);
                 let base = BaseGraph::load_from_binary(&graph).unwrap();
                 run_with_ks!(base.k(), {
                     let graph = base.finish::<KS>();
